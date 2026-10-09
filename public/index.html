@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Promographe | Commandes et achats</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div>
+        <a class="brand" href="/">Promographe</a>
+        <p>Gestion des commandes et des achats</p>
+      </div>
+      <div class="account">
+        <span id="accountInfo">Chargement du compte...</span>
+        <button class="button button-outline" id="logoutButton" type="button">Se déconnecter</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="welcome">
+      <div>
+        <p class="eyebrow">ESPACE DE GESTION</p>
+        <h1>Bonjour, bienvenue sur Promographe</h1>
+        <p>Consultez le catalogue, soumettez vos demandes d’achat et suivez leur approbation.</p>
+      </div>
+      <div class="health" id="status" role="status">Connexion au serveur…</div>
+    </section>
+
+    <nav class="tabs" aria-label="Sections de l’application">
+      <button class="tab" id="homeTab" type="button" data-panel="homePanel" hidden>Accueil</button>
+      <button class="tab active" id="ordersTab" type="button" data-panel="ordersPanel">Commandes</button>
+      <button class="tab" type="button" data-panel="productsPanel">Catalogue</button>
+      <button class="tab" id="adminTab" type="button" data-panel="adminPanel" hidden>Administration</button>
+    </nav>
+
+    <section class="panel" id="homePanel" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">TABLEAU DE BORD</p>
+          <h2>Budgets et dépenses</h2>
+        </div>
+        <label class="filter-label">
+          Année
+          <select id="dashboardYear"></select>
+        </label>
+      </div>
+      <p class="muted dashboard-note">Dépensé = demandes approuvées. En attente = demandes pas encore approuvées. Calculé selon la date de la demande.</p>
+      <div class="kpi-row" id="kpiRow" aria-live="polite"></div>
+
+      <div class="card dashboard-card">
+        <h3>Budget par département</h3>
+        <div class="budget-legend" aria-hidden="true">
+          <span><i class="swatch swatch-spent"></i>Dépensé</span>
+          <span><i class="swatch swatch-pending"></i>En attente</span>
+          <span><i class="swatch swatch-over"></i>Dépassement</span>
+        </div>
+        <div class="table-wrap">
+          <table class="budget-table">
+            <thead>
+              <tr>
+                <th scope="col">Département</th>
+                <th scope="col">Budget annuel</th>
+                <th scope="col" class="num">Dépensé</th>
+                <th scope="col" class="num">En attente</th>
+                <th scope="col" class="num">Restant</th>
+                <th scope="col">Utilisation</th>
+              </tr>
+            </thead>
+            <tbody id="budgetRows"></tbody>
+          </table>
+        </div>
+        <p class="form-message" id="budgetMessage" role="status"></p>
+      </div>
+
+      <div class="card dashboard-card">
+        <h3>Dépenses approuvées par fournisseur</h3>
+        <div class="supplier-bars" id="supplierBars"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="ordersPanel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">SUIVI DES ACHATS</p>
+          <h2>Demandes de commande</h2>
+        </div>
+        <button class="button" id="newOrderButton" type="button" hidden>Nouvelle demande</button>
+      </div>
+
+      <form class="card order-form" id="orderForm" hidden>
+        <h3>Préparer une demande</h3>
+        <p class="muted">Choisissez les articles et les quantités. Le prix est calculé au moment de la demande.</p>
+        <div class="order-items" id="orderItems"></div>
+        <button class="button button-secondary" id="addOrderItem" type="button">Ajouter un produit</button>
+        <label for="orderNotes">Note pour l’administrateur <span class="optional">(facultatif)</span></label>
+        <textarea id="orderNotes" name="notes" maxlength="1000" rows="3"></textarea>
+        <p class="form-message" id="orderMessage" role="status"></p>
+        <button class="button" type="submit">Soumettre la demande</button>
+      </form>
+
+      <div class="order-list" id="orderList" aria-live="polite">
+        <p class="muted">Chargement des demandes…</p>
+      </div>
+    </section>
+
+    <section class="panel" id="productsPanel" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">ARTICLES DISPONIBLES</p>
+          <h2>Catalogue des produits</h2>
+        </div>
+        <label class="filter-label" id="productFilterField" hidden>
+          Département
+          <select id="productFilter">
+            <option value="">Tous les départements</option>
+          </select>
+        </label>
+      </div>
+      <form class="card product-form" id="productForm">
+        <h3 id="productFormTitle">Ajouter un produit</h3>
+        <input id="productId" name="productId" type="hidden">
+        <label for="productName">Nom du produit</label>
+        <input id="productName" name="name" maxlength="150" required>
+        <label for="productDescription">Description <span class="optional">(facultatif)</span></label>
+        <textarea id="productDescription" name="description" maxlength="500" rows="2"></textarea>
+        <div id="productDepartmentField" hidden>
+          <label for="productDepartment">Département</label>
+          <select id="productDepartment" name="departmentId">
+            <option value="">Choisir un département</option>
+          </select>
+          <label for="productSupplier">Fournisseur <span class="optional">(facultatif)</span></label>
+          <input id="productSupplier" name="supplierName" list="supplierOptions" maxlength="150"
+            autocomplete="off" placeholder="Tapez le nom du fournisseur">
+          <datalist id="supplierOptions"></datalist>
+        </div>
+        <label for="productPrice">Prix unitaire (CAD)</label>
+        <input id="productPrice" name="price" type="number" min="0" max="21474836.47" step="0.01" required>
+        <label class="checkbox-label" for="productActive">
+          <input id="productActive" name="isActive" type="checkbox" checked>
+          Disponible pour les nouvelles demandes
+        </label>
+        <div class="form-actions">
+          <button class="button" id="saveProductButton" type="submit">Ajouter au catalogue</button>
+          <button class="button button-secondary" id="cancelProductEdit" type="button" hidden>Annuler</button>
+        </div>
+        <p class="form-message" id="productMessage" role="status"></p>
+      </form>
+      <div class="product-grid" id="productList" aria-live="polite">
+        <p class="muted">Chargement du catalogue…</p>
+      </div>
+    </section>
+
+    <section class="panel" id="adminPanel" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">GESTION DES ACCÈS</p>
+          <h2>Administration des responsables</h2>
+        </div>
+      </div>
+      <div class="admin-grid">
+        <form class="card" id="departmentForm">
+          <h3>Créer un département</h3>
+          <label for="departmentName">Nom du département</label>
+          <input id="departmentName" name="name" maxlength="100" required>
+          <button class="button" type="submit">Ajouter le département</button>
+          <p class="form-message" id="departmentMessage" role="status"></p>
+        </form>
+        <form class="card" id="invitationForm">
+          <h3>Inviter un responsable</h3>
+          <label for="inviteName">Nom complet</label>
+          <input id="inviteName" name="fullName" maxlength="150" autocomplete="off" required>
+          <label for="inviteEmail">Adresse courriel</label>
+          <input id="inviteEmail" name="email" type="email" maxlength="254" required>
+          <label for="departmentId">Département</label>
+          <select id="departmentId" name="departmentId" required>
+            <option value="">Choisir un département</option>
+          </select>
+          <button class="button" type="submit">Envoyer l’invitation</button>
+          <p class="form-message" id="invitationMessage" role="status"></p>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Départements</h3>
+        <ul id="departmentList" class="user-list"></ul>
+      </div>
+      <div class="admin-grid">
+        <form class="card" id="supplierForm">
+          <h3>Ajouter un fournisseur</h3>
+          <label for="supplierName">Nom du fournisseur</label>
+          <input id="supplierName" name="name" maxlength="150" required>
+          <label for="supplierContact">Personne contact <span class="optional">(facultatif)</span></label>
+          <input id="supplierContact" name="contactName" maxlength="150">
+          <label for="supplierEmail">Courriel <span class="optional">(facultatif)</span></label>
+          <input id="supplierEmail" name="email" type="email" maxlength="254">
+          <label for="supplierPhone">Téléphone <span class="optional">(facultatif)</span></label>
+          <input id="supplierPhone" name="phone" type="tel" maxlength="50">
+          <button class="button" type="submit">Ajouter le fournisseur</button>
+          <p class="form-message" id="supplierMessage" role="status"></p>
+        </form>
+        <div class="card">
+          <h3>Fournisseurs</h3>
+          <ul id="supplierList" class="user-list"></ul>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Comptes responsables</h3>
+        <ul id="userList" class="user-list"></ul>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

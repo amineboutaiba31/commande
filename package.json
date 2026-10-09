@@ -1,0 +1,27 @@
+{
+  "name": "promographe",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "db:migrate": "node scripts/migrate.js",
+    "admin:create": "node scripts/create-admin.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@azure/identity": "^4.13.3",
+    "@azure/identity-vscode": "^2.2.2",
+    "argon2": "^0.45.1",
+    "dotenv": "^18.0.6",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
+    "express-session": "^1.19.0",
+    "mssql": "^12.7.4",
+    "nodemailer": "^10.0.16"
+  }
+}

@@ -1,0 +1,212 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connexion | Promographe</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #f2f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: #26364a;
+    }
+
+    .login-container {
+      width: 100%;
+      max-width: 430px;
+      background: white;
+      border-radius: 16px;
+      padding: 38px;
+      box-shadow: 0 12px 40px rgba(24, 53, 84, 0.10);
+    }
+
+    .brand {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .brand-icon {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto 14px;
+      border-radius: 14px;
+      background: #174a7e;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 27px;
+      font-weight: bold;
+    }
+
+    h1 {
+      margin: 0;
+      color: #174a7e;
+      font-size: 27px;
+    }
+
+    .subtitle {
+      color: #718096;
+      font-size: 14px;
+      margin-top: 9px;
+    }
+
+    label {
+      display: block;
+      margin: 18px 0 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      padding: 13px 14px;
+      border: 1px solid #d8e0e9;
+      border-radius: 8px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: #174a7e;
+      box-shadow: 0 0 0 3px rgba(23, 74, 126, 0.10);
+    }
+
+    button {
+      width: 100%;
+      margin-top: 25px;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      background: #174a7e;
+      color: white;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #10375e;
+    }
+
+    .message {
+      margin-top: 16px;
+      font-size: 14px;
+      text-align: center;
+      color: #b42318;
+      min-height: 18px;
+    }
+
+    footer {
+      margin-top: 28px;
+      text-align: center;
+      font-size: 12px;
+      color: #8995a5;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="login-container">
+    <div class="brand">
+      <div class="brand-icon">P</div>
+      <h1>Promographe</h1>
+      <p class="subtitle">Gestion des commandes et des achats</p>
+    </div>
+
+    <form id="loginForm">
+      <label for="email">Adresse courriel</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        placeholder="nom@entreprise.ca"
+        autocomplete="username"
+        required
+      >
+
+      <label for="password">Mot de passe</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        placeholder="Entrez votre mot de passe"
+        autocomplete="current-password"
+        required
+      >
+
+      <button id="submitButton" type="submit">Se connecter</button>
+
+      <p class="message" id="message" role="alert"></p>
+    </form>
+
+    <footer>
+      Promographe · Plateforme interne de gestion
+    </footer>
+  </main>
+
+  <script>
+    const form = document.getElementById("loginForm");
+    const message = document.getElementById("message");
+    const submitButton = document.getElementById("submitButton");
+    let csrfToken;
+
+    fetch("/api/auth/csrf")
+      .then(async response => {
+        if (!response.ok) {
+          throw new Error("Impossible d'initialiser la connexion. Réessaie plus tard.");
+        }
+        const data = await response.json();
+        csrfToken = data.csrfToken;
+      })
+      .catch(error => {
+        message.textContent = error.message;
+        submitButton.disabled = true;
+      });
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (!csrfToken) {
+        message.textContent = "La session n'est pas prête. Recharge la page et réessaie.";
+        return;
+      }
+
+      submitButton.disabled = true;
+      message.textContent = "";
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken
+          },
+          body: JSON.stringify({
+            email: form.elements.email.value,
+            password: form.elements.password.value
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "La connexion a échoué.");
+        }
+        window.location.assign("/");
+      } catch (error) {
+        message.textContent = error.message;
+        submitButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

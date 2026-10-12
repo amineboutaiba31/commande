@@ -66,6 +66,33 @@ and send manager invitations after SMTP has been configured with
 Invitation links expire after 24 hours; only a hash of each random token is
 stored, and successful activation invalidates the token.
 
+Signed-in users can change their password from the "Mot de passe" button
+(current password required). Users who forgot their password request a reset
+link from the login page; the link is emailed with the same SMTP settings,
+expires after 1 hour, works once, and the response never reveals whether an
+account exists. Any password change or reset signs out the account's other
+sessions.
+
+## Sign in with Microsoft (optional)
+
+The login page shows "Se connecter avec Microsoft" next to the password form
+once these settings are present:
+
+1. In the Azure portal, open Microsoft Entra ID › App registrations › New
+   registration. Choose "Accounts in this organizational directory only"
+   and add a **Web** redirect URI of
+   `<APP_BASE_URL>/api/auth/microsoft/callback` (for local development,
+   `http://localhost:3000/api/auth/microsoft/callback`).
+2. From the overview page, copy the application (client) ID and the directory
+   (tenant) ID into `AUTH_MICROSOFT_CLIENT_ID` and `AUTH_MICROSOFT_TENANT_ID`.
+3. Under Certificates & secrets, create a client secret and put its value in
+   `AUTH_MICROSOFT_CLIENT_SECRET`. Never commit it; renew it before it expires.
+
+Only invited Promographe accounts can sign in this way: the Microsoft account
+must belong to the configured tenant and its email must match a Promographe
+user. A pending invitee who signs in with Microsoft is activated without
+choosing a password. Departments and roles are still managed in Promographe.
+
 Start the application with:
 
 ```sh

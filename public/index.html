@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Promographe | Commandes et achats</title>
+  <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="stylesheet" href="/app.css">
   <script src="/app.js" defer></script>
 </head>
@@ -17,6 +18,22 @@
       </div>
       <div class="account">
         <span id="accountInfo">Chargement du compte...</span>
+        <div class="notifications">
+          <button class="icon-button" id="notificationButton" type="button"
+            aria-label="Notifications" aria-expanded="false" aria-controls="notificationPanel">
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
+              <path d="M13.7 21a2 2 0 0 1-3.4 0"></path>
+            </svg>
+            <span class="notification-badge" id="notificationBadge" hidden>0</span>
+          </button>
+          <div class="notification-panel" id="notificationPanel" hidden>
+            <p class="notification-title">Notifications</p>
+            <ul class="notification-list" id="notificationList"></ul>
+          </div>
+        </div>
+        <button class="button button-outline" id="profileButton" type="button">Profil</button>
         <button class="button button-outline" id="logoutButton" type="button">Se déconnecter</button>
       </div>
     </div>
@@ -35,6 +52,7 @@
     <nav class="tabs" aria-label="Sections de l’application">
       <button class="tab" id="homeTab" type="button" data-panel="homePanel" hidden>Accueil</button>
       <button class="tab active" id="ordersTab" type="button" data-panel="ordersPanel">Commandes</button>
+      <button class="tab" id="historyTab" type="button" data-panel="historyPanel">Historique</button>
       <button class="tab" type="button" data-panel="productsPanel">Catalogue</button>
       <button class="tab" id="adminTab" type="button" data-panel="adminPanel" hidden>Administration</button>
     </nav>
@@ -77,18 +95,13 @@
         </div>
         <p class="form-message" id="budgetMessage" role="status"></p>
       </div>
-
-      <div class="card dashboard-card">
-        <h3>Dépenses approuvées par fournisseur</h3>
-        <div class="supplier-bars" id="supplierBars"></div>
-      </div>
     </section>
 
     <section class="panel" id="ordersPanel">
       <div class="section-heading">
         <div>
           <p class="eyebrow">SUIVI DES ACHATS</p>
-          <h2>Demandes de commande</h2>
+          <h2>Demandes en attente</h2>
         </div>
         <button class="button" id="newOrderButton" type="button" hidden>Nouvelle demande</button>
       </div>
@@ -109,18 +122,27 @@
       </div>
     </section>
 
+    <section class="panel" id="historyPanel" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">DEMANDES TRAITÉES</p>
+          <h2>Historique des commandes</h2>
+        </div>
+        <div class="form-actions history-actions">
+          <button class="button button-secondary" id="historyPreviewButton" type="button" aria-expanded="false">Visualiser</button>
+          <button class="button" id="historyDownloadButton" type="button">Télécharger en CSV</button>
+        </div>
+      </div>
+
+      <div class="card table-wrap" id="historyPreview" hidden></div>
+    </section>
+
     <section class="panel" id="productsPanel" hidden>
       <div class="section-heading">
         <div>
           <p class="eyebrow">ARTICLES DISPONIBLES</p>
           <h2>Catalogue des produits</h2>
         </div>
-        <label class="filter-label" id="productFilterField" hidden>
-          Département
-          <select id="productFilter">
-            <option value="">Tous les départements</option>
-          </select>
-        </label>
       </div>
       <form class="card product-form" id="productForm">
         <h3 id="productFormTitle">Ajouter un produit</h3>
@@ -151,68 +173,172 @@
         </div>
         <p class="form-message" id="productMessage" role="status"></p>
       </form>
-      <div class="product-grid" id="productList" aria-live="polite">
+      <div class="catalogue-heading" id="productFilterField" hidden>
+        <h3>Produits par département</h3>
+        <label class="filter-label">
+          Département
+          <select id="productFilter">
+            <option value="">Choisir un département</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap" id="productList" aria-live="polite">
         <p class="muted">Chargement du catalogue…</p>
       </div>
+    </section>
+
+    <section class="panel" id="developerPanel" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">ACCÈS DE L’ENTREPRISE</p>
+          <h2>Administrateurs</h2>
+        </div>
+        <button class="button" id="addAdminButton" type="button">Inviter un administrateur</button>
+      </div>
+      <p class="muted">Invitez l’administrateur de l’entreprise : il reçoit un courriel et choisit lui-même son mot de passe.</p>
+      <form class="card admin-form" id="adminInvitationForm" hidden>
+        <h4>Inviter un administrateur</h4>
+        <label for="adminInviteName">Nom complet</label>
+        <input id="adminInviteName" name="fullName" maxlength="150" autocomplete="off" required>
+        <label for="adminInviteEmail">Adresse courriel</label>
+        <input id="adminInviteEmail" name="email" type="email" maxlength="254" required>
+        <div class="form-actions">
+          <button class="button" type="submit">Envoyer l’invitation</button>
+          <button class="button button-secondary" data-cancel type="button">Annuler</button>
+        </div>
+      </form>
+      <p class="form-message" id="adminInvitationMessage" role="status"></p>
+      <div class="table-wrap" id="adminTable"></div>
     </section>
 
     <section class="panel" id="adminPanel" hidden>
       <div class="section-heading">
         <div>
-          <p class="eyebrow">GESTION DES ACCÈS</p>
-          <h2>Administration des responsables</h2>
+          <p class="eyebrow">GESTION</p>
+          <h2>Administration</h2>
         </div>
       </div>
-      <div class="admin-grid">
-        <form class="card" id="departmentForm">
-          <h3>Créer un département</h3>
-          <label for="departmentName">Nom du département</label>
-          <input id="departmentName" name="name" maxlength="100" required>
-          <button class="button" type="submit">Ajouter le département</button>
-          <p class="form-message" id="departmentMessage" role="status"></p>
-        </form>
-        <form class="card" id="invitationForm">
-          <h3>Inviter un responsable</h3>
-          <label for="inviteName">Nom complet</label>
-          <input id="inviteName" name="fullName" maxlength="150" autocomplete="off" required>
-          <label for="inviteEmail">Adresse courriel</label>
-          <input id="inviteEmail" name="email" type="email" maxlength="254" required>
-          <label for="departmentId">Département</label>
-          <select id="departmentId" name="departmentId" required>
-            <option value="">Choisir un département</option>
-          </select>
-          <button class="button" type="submit">Envoyer l’invitation</button>
-          <p class="form-message" id="invitationMessage" role="status"></p>
-        </form>
-      </div>
-      <div class="card">
-        <h3>Départements</h3>
-        <ul id="departmentList" class="user-list"></ul>
-      </div>
-      <div class="admin-grid">
-        <form class="card" id="supplierForm">
-          <h3>Ajouter un fournisseur</h3>
-          <label for="supplierName">Nom du fournisseur</label>
-          <input id="supplierName" name="name" maxlength="150" required>
-          <label for="supplierContact">Personne contact <span class="optional">(facultatif)</span></label>
-          <input id="supplierContact" name="contactName" maxlength="150">
-          <label for="supplierEmail">Courriel <span class="optional">(facultatif)</span></label>
-          <input id="supplierEmail" name="email" type="email" maxlength="254">
-          <label for="supplierPhone">Téléphone <span class="optional">(facultatif)</span></label>
-          <input id="supplierPhone" name="phone" type="tel" maxlength="50">
-          <button class="button" type="submit">Ajouter le fournisseur</button>
-          <p class="form-message" id="supplierMessage" role="status"></p>
-        </form>
-        <div class="card">
-          <h3>Fournisseurs</h3>
-          <ul id="supplierList" class="user-list"></ul>
+      <div class="admin-layout">
+        <nav class="admin-menu" aria-label="Sections de l’administration">
+          <button class="admin-menu-item active" type="button" data-admin-section="managersSection">Responsables</button>
+          <button class="admin-menu-item" type="button" data-admin-section="departmentsSection">Départements</button>
+          <button class="admin-menu-item" type="button" data-admin-section="suppliersSection">Fournisseurs</button>
+        </nav>
+
+        <div class="admin-content">
+          <section class="admin-section" id="managersSection">
+            <div class="admin-section-heading">
+              <h3>Responsables</h3>
+              <button class="button" id="addManagerButton" type="button">Ajouter un responsable</button>
+            </div>
+            <form class="card admin-form" id="invitationForm" hidden>
+              <h4 id="managerFormTitle">Inviter un responsable</h4>
+              <input name="userId" type="hidden">
+              <label for="inviteName">Nom complet</label>
+              <input id="inviteName" name="fullName" maxlength="150" autocomplete="off" required>
+              <label for="inviteEmail">Adresse courriel</label>
+              <input id="inviteEmail" name="email" type="email" maxlength="254" required>
+              <label for="departmentId">Département</label>
+              <select id="departmentId" name="departmentId" required>
+                <option value="">Choisir un département</option>
+              </select>
+              <div class="form-actions">
+                <button class="button" type="submit">Envoyer l’invitation</button>
+                <button class="button button-secondary" data-cancel type="button">Annuler</button>
+              </div>
+            </form>
+            <p class="form-message" id="invitationMessage" role="status"></p>
+            <div class="table-wrap" id="managerTable"></div>
+          </section>
+
+          <section class="admin-section" id="departmentsSection" hidden>
+            <div class="admin-section-heading">
+              <h3>Départements</h3>
+              <button class="button" id="addDepartmentButton" type="button">Ajouter un département</button>
+            </div>
+            <form class="card admin-form" id="departmentForm" hidden>
+              <h4 id="departmentFormTitle">Ajouter un département</h4>
+              <input name="departmentId" type="hidden">
+              <label for="departmentName">Nom du département</label>
+              <input id="departmentName" name="name" maxlength="100" required>
+              <div class="form-actions">
+                <button class="button" type="submit">Enregistrer</button>
+                <button class="button button-secondary" data-cancel type="button">Annuler</button>
+              </div>
+            </form>
+            <p class="form-message" id="departmentMessage" role="status"></p>
+            <div class="table-wrap" id="departmentTable"></div>
+          </section>
+
+          <section class="admin-section" id="suppliersSection" hidden>
+            <div class="admin-section-heading">
+              <h3>Fournisseurs</h3>
+              <button class="button" id="addSupplierButton" type="button">Ajouter un fournisseur</button>
+            </div>
+            <form class="card admin-form" id="supplierForm" hidden>
+              <h4 id="supplierFormTitle">Ajouter un fournisseur</h4>
+              <input name="supplierId" type="hidden">
+              <label for="supplierName">Nom du fournisseur</label>
+              <input id="supplierName" name="name" maxlength="150" required>
+              <label for="supplierContact">Personne contact <span class="optional">(facultatif)</span></label>
+              <input id="supplierContact" name="contactName" maxlength="150">
+              <label for="supplierEmail">Courriel <span class="optional">(facultatif)</span></label>
+              <input id="supplierEmail" name="email" type="email" maxlength="254">
+              <label for="supplierPhone">Téléphone <span class="optional">(facultatif)</span></label>
+              <input id="supplierPhone" name="phone" type="tel" maxlength="50">
+              <div class="form-actions">
+                <button class="button" type="submit">Enregistrer</button>
+                <button class="button button-secondary" data-cancel type="button">Annuler</button>
+              </div>
+            </form>
+            <p class="form-message" id="supplierMessage" role="status"></p>
+            <div class="table-wrap" id="supplierTable"></div>
+          </section>
         </div>
-      </div>
-      <div class="card">
-        <h3>Comptes responsables</h3>
-        <ul id="userList" class="user-list"></ul>
       </div>
     </section>
   </main>
+
+  <dialog class="password-dialog" id="profileDialog" aria-labelledby="profileDialogTitle">
+    <form class="card" id="profileForm">
+      <h3 id="profileDialogTitle">Mon profil</h3>
+      <label for="profileFullName">Nom complet (prénom et nom)</label>
+      <input id="profileFullName" name="fullName" maxlength="150" required autocomplete="name">
+      <dl class="profile-details">
+        <dt>Courriel</dt>
+        <dd id="profileEmail"></dd>
+        <dt>Rôle</dt>
+        <dd id="profileRole"></dd>
+        <dt id="profileDepartmentLabel">Département</dt>
+        <dd id="profileDepartment"></dd>
+      </dl>
+      <p class="form-message" id="profileMessage" role="status"></p>
+      <div class="form-actions">
+        <button class="button" type="submit">Enregistrer</button>
+        <button class="button button-secondary" id="passwordButton" type="button">Modifier le mot de passe</button>
+        <button class="button button-secondary" id="closeProfileDialog" type="button">Fermer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="password-dialog" id="passwordDialog" aria-labelledby="passwordDialogTitle">
+    <form class="card" id="passwordForm">
+      <h3 id="passwordDialogTitle">Changer mon mot de passe</h3>
+      <label for="currentPassword">Mot de passe actuel</label>
+      <input id="currentPassword" name="currentPassword" type="password" maxlength="256"
+        autocomplete="current-password" required>
+      <label for="newPassword">Nouveau mot de passe <span class="optional">(12 caractères minimum)</span></label>
+      <input id="newPassword" name="newPassword" type="password" minlength="12" maxlength="256"
+        autocomplete="new-password" required>
+      <label for="newPasswordConfirmation">Confirmer le nouveau mot de passe</label>
+      <input id="newPasswordConfirmation" name="newPasswordConfirmation" type="password"
+        minlength="12" maxlength="256" autocomplete="new-password" required>
+      <p class="form-message" id="passwordMessage" role="status"></p>
+      <div class="form-actions">
+        <button class="button" type="submit">Enregistrer</button>
+        <button class="button button-secondary" id="closePasswordDialog" type="button">Fermer</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

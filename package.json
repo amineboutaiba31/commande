@@ -14,8 +14,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@azure/communication-email": "^1.1.0",
     "@azure/identity": "^4.13.3",
     "@azure/identity-vscode": "^2.2.2",
+    "@azure/msal-node": "^7.0.1",
     "argon2": "^0.45.1",
     "dotenv": "^18.0.6",
     "express": "^5.2.1",

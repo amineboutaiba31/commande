@@ -6,6 +6,7 @@ const session = require("express-session");
 const { createApp } = require("../server");
 const { createSqlConfig } = require("../src/database");
 const { MemoryDatabase } = require("./support/memory-database");
+const { createInvitationMailer } = require("../src/invitation-mailer");
 
 const ADMIN_EMAIL = "admin@example.ca";
 const ADMIN_PASSWORD = "a-unique-test-password";
@@ -206,6 +207,34 @@ test("limits repeated login attempts", async (t) => {
   }
   const blocked = await login(baseUrl, ADMIN_EMAIL, "wrong-password");
   assert.equal(blocked.response.status, 429);
+});
+
+test("the session cookie ends when the browser closes", async (t) => {
+  const { baseUrl } = await startApp(t);
+  const { response } = await login(baseUrl, ADMIN_EMAIL, ADMIN_PASSWORD);
+  assert.equal(response.status, 200);
+  const cookie = response.headers.get("set-cookie");
+  assert.match(cookie, /promographe\.sid=/);
+  assert.doesNotMatch(cookie, /Expires=|Max-Age=/i);
+});
+
+test("pages are served with browser security headers and no inline scripts", async (t) => {
+  const { baseUrl } = await startApp(t);
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const response = await fetch(`${baseUrl}/login.html`);
+  assert.equal(response.status, 200);
+  const csp = response.headers.get("content-security-policy");
+  assert.match(csp, /script-src 'self'(;|$)/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  // A strict script-src blocks inline scripts and handlers, so the pages must not use any.
+  for (const file of fs.readdirSync(path.join(__dirname, "..", "public")).filter((name) => name.endsWith(".html"))) {
+    const html = fs.readFileSync(path.join(__dirname, "..", "public", file), "utf8");
+    assert.doesNotMatch(html, /<script>/, file);
+    assert.doesNotMatch(html, /\son[a-z]+="/, file);
+  }
 });
 
 test("admin can invite a department manager and invitation activates once", async (t) => {
@@ -667,7 +696,7 @@ test("admin dashboard reports budgets and spending per department", async (t) =>
     pendingCents: 2500,
     pendingOrders: 1
   }]);
-  assert.deepEqual(dashboard.suppliers, [{ name: "Bureau Plus", approvedCents: 10000 }]);
+  assert.equal(dashboard.suppliers, undefined);
   assert.deepEqual(dashboard.orderCounts, { approved: 1, pending: 1 });
 });
 
@@ -706,4 +735,416 @@ test("typing a supplier name on a product reuses or creates the supplier", async
     (await suppliers.json()).suppliers.map((supplier) => supplier.name).sort(),
     ["Bureau Plus", "Encres Québec"]
   );
+});
+
+test("users change their password and other sessions are signed out", async (t) => {
+  const { baseUrl } = await startApp(t);
+  const current = await makeAdminSession(baseUrl);
+  const other = await makeAdminSession(baseUrl);
+  const newPassword = "a-brand-new-admin-password";
+
+  const wrongCurrent = await postJson(
+    baseUrl, current.cookie, current.csrfToken, "/api/auth/change-password",
+    { currentPassword: "not-the-password", newPassword }
+  );
+  assert.equal(wrongCurrent.status, 400);
+  const tooShort = await postJson(
+    baseUrl, current.cookie, current.csrfToken, "/api/auth/change-password",
+    { currentPassword: ADMIN_PASSWORD, newPassword: "short" }
+  );
+  assert.equal(tooShort.status, 400);
+  const samePassword = await postJson(
+    baseUrl, current.cookie, current.csrfToken, "/api/auth/change-password",
+    { currentPassword: ADMIN_PASSWORD, newPassword: ADMIN_PASSWORD }
+  );
+  assert.equal(samePassword.status, 400);
+
+  const changed = await postJson(
+    baseUrl, current.cookie, current.csrfToken, "/api/auth/change-password",
+    { currentPassword: ADMIN_PASSWORD, newPassword }
+  );
+  assert.equal(changed.status, 204);
+
+  const currentMe = await fetch(`${baseUrl}/api/auth/me`, { headers: { Cookie: current.cookie } });
+  assert.equal(currentMe.status, 200);
+  const otherMe = await fetch(`${baseUrl}/api/auth/me`, { headers: { Cookie: other.cookie } });
+  assert.equal(otherMe.status, 401);
+
+  assert.equal((await login(baseUrl, ADMIN_EMAIL, ADMIN_PASSWORD)).response.status, 401);
+  assert.equal((await login(baseUrl, ADMIN_EMAIL, newPassword)).response.status, 200);
+});
+
+test("forgotten passwords are reset through a single-use emailed link", async (t) => {
+  const sentResets = [];
+  const { baseUrl } = await startApp(t, {
+    sendPasswordResetEmail: async (message) => sentResets.push(message)
+  });
+  const signedIn = await makeAdminSession(baseUrl);
+  const requestReset = async (email) => {
+    const csrf = await getCsrfToken(baseUrl);
+    return postJson(baseUrl, csrf.cookie, csrf.token, "/api/auth/password-reset/request", { email });
+  };
+
+  const unknown = await requestReset("nobody@example.ca");
+  assert.equal(unknown.status, 202);
+  assert.equal(sentResets.length, 0);
+
+  const known = await requestReset(ADMIN_EMAIL.toUpperCase());
+  assert.equal(known.status, 202);
+  assert.deepEqual(await known.json(), await unknown.json());
+  assert.equal(sentResets.length, 1);
+  assert.equal(sentResets[0].email, ADMIN_EMAIL);
+  const { token } = sentResets[0];
+  assert.match(token, /^[a-f0-9]{96}$/);
+
+  const validate = await fetch(`${baseUrl}/api/auth/password-reset/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token })
+  });
+  assert.equal(validate.status, 200);
+  assert.equal((await validate.json()).email, ADMIN_EMAIL);
+
+  const newPassword = "reset-admin-password-123";
+  const csrf = await getCsrfToken(baseUrl);
+  const complete = await postJson(
+    baseUrl, csrf.cookie, csrf.token, "/api/auth/password-reset/complete", { token, password: newPassword }
+  );
+  assert.equal(complete.status, 204);
+
+  const reuseCsrf = await getCsrfToken(baseUrl);
+  const reuse = await postJson(
+    baseUrl, reuseCsrf.cookie, reuseCsrf.token, "/api/auth/password-reset/complete",
+    { token, password: "another-password-456" }
+  );
+  assert.equal(reuse.status, 400);
+
+  const oldSession = await fetch(`${baseUrl}/api/auth/me`, { headers: { Cookie: signedIn.cookie } });
+  assert.equal(oldSession.status, 401);
+  assert.equal((await login(baseUrl, ADMIN_EMAIL, newPassword)).response.status, 200);
+});
+
+test("password reset requires email delivery to be configured", async (t) => {
+  const { baseUrl } = await startApp(t);
+  const csrf = await getCsrfToken(baseUrl);
+  const response = await postJson(
+    baseUrl, csrf.cookie, csrf.token, "/api/auth/password-reset/request", { email: ADMIN_EMAIL }
+  );
+  assert.equal(response.status, 503);
+});
+
+test("admins delete products and suppliers while order history stays intact", async (t) => {
+  const { app, baseUrl } = await startApp(t);
+  const database = app.locals.database;
+  const financeId = await database.createDepartment("Finance");
+  const manager = await makeManagerSession(
+    app, baseUrl, financeId, "finance@example.ca", "finance-test-password"
+  );
+  const admin = await makeAdminSession(baseUrl);
+  const supplierId = await database.createSupplier("Imprimerie ABC", "", "", "");
+  const productId = await database.createProduct("Papier", "", 1250, financeId, supplierId, 1);
+  const order = await postJson(baseUrl, manager.cookie, manager.csrfToken, "/api/orders", {
+    items: [{ productId, quantity: 2 }]
+  });
+  assert.equal(order.status, 201);
+
+  const deleteRequest = (session, url) => fetch(`${baseUrl}${url}`, {
+    method: "DELETE",
+    headers: { Cookie: session.cookie, "X-CSRF-Token": session.csrfToken }
+  });
+  assert.equal((await deleteRequest(manager, `/api/products/${productId}`)).status, 403);
+  assert.equal((await deleteRequest(manager, `/api/admin/suppliers/${supplierId}`)).status, 403);
+
+  const otherProductId = await database.createProduct("Crayons", "", 300, financeId, supplierId, 1);
+  assert.equal((await deleteRequest(admin, `/api/admin/suppliers/${supplierId}`)).status, 204);
+  assert.equal((await database.listSuppliers()).length, 0);
+  assert.equal((await database.getProduct(otherProductId)).supplier_id, null);
+
+  assert.equal((await deleteRequest(admin, `/api/products/${productId}`)).status, 204);
+  assert.equal((await deleteRequest(admin, `/api/products/${productId}`)).status, 404);
+  const catalogue = await fetch(`${baseUrl}/api/products`, { headers: { Cookie: manager.cookie } });
+  assert.deepEqual((await catalogue.json()).products.map((product) => product.name), ["Crayons"]);
+  const reorder = await postJson(baseUrl, manager.cookie, manager.csrfToken, "/api/orders", {
+    items: [{ productId, quantity: 1 }]
+  });
+  assert.equal(reorder.status, 409);
+
+  const orders = await fetch(`${baseUrl}/api/orders`, { headers: { Cookie: admin.cookie } });
+  assert.equal((await orders.json()).orders[0].items[0].productName, "Papier");
+});
+
+test("users see their profile and update their full name", async (t) => {
+  const { app, baseUrl } = await startApp(t);
+  const financeId = await app.locals.database.createDepartment("Finance");
+  const manager = await makeManagerSession(
+    app, baseUrl, financeId, "finance@example.ca", "finance-test-password", "Julie Gagnon"
+  );
+  const me = async () => (await (await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { Cookie: manager.cookie }
+  })).json()).user;
+  assert.deepEqual(
+    (({ email, fullName, role, departmentName }) => ({ email, fullName, role, departmentName }))(await me()),
+    { email: "finance@example.ca", fullName: "Julie Gagnon", role: "department_manager", departmentName: "Finance" }
+  );
+
+  const update = (fullName) => fetch(`${baseUrl}/api/auth/profile`, {
+    method: "PATCH",
+    headers: { Cookie: manager.cookie, "X-CSRF-Token": manager.csrfToken, "Content-Type": "application/json" },
+    body: JSON.stringify({ fullName })
+  });
+  assert.equal((await update("  ")).status, 400);
+  assert.equal((await update("Julie Tremblay")).status, 200);
+  assert.equal((await me()).fullName, "Julie Tremblay");
+});
+
+test("admins edit and delete managers, departments and suppliers", async (t) => {
+  const { app, baseUrl } = await startApp(t);
+  const database = app.locals.database;
+  const financeId = await database.createDepartment("Finance");
+  const salesId = await database.createDepartment("Ventes");
+  const manager = await makeManagerSession(
+    app, baseUrl, financeId, "finance@example.ca", "finance-test-password", "Julie Gagnon"
+  );
+  const admin = await makeAdminSession(baseUrl);
+  const send = (session, method, url, body) => fetch(`${baseUrl}${url}`, {
+    method,
+    headers: { Cookie: session.cookie, "X-CSRF-Token": session.csrfToken, "Content-Type": "application/json" },
+    body: body && JSON.stringify(body)
+  });
+
+  // Managers cannot use the admin actions.
+  assert.equal((await send(manager, "DELETE", `/api/admin/departments/${salesId}`)).status, 403);
+
+  // Suppliers.
+  const supplierId = await database.createSupplier("Bureau Plus", "", "", "");
+  await database.createSupplier("Uline", "", "", "");
+  assert.equal((await send(admin, "PATCH", `/api/admin/suppliers/${supplierId}`, { name: "Uline" })).status, 409);
+  assert.equal((await send(admin, "PATCH", `/api/admin/suppliers/${supplierId}`, {
+    name: "Bureau Plus Inc.", contactName: "Marc", email: "MARC@BUREAU.CA", phone: "514-555-0000"
+  })).status, 200);
+  assert.deepEqual(
+    (await database.listSuppliers()).find((supplier) => supplier.id === supplierId),
+    { id: supplierId, name: "Bureau Plus Inc.", contact_name: "Marc", email: "marc@bureau.ca", phone: "514-555-0000" }
+  );
+
+  // Departments: rename, and refuse deletion while a manager or a pending order remains.
+  assert.equal((await send(admin, "PATCH", `/api/admin/departments/${salesId}`, { name: "Finance" })).status, 409);
+  assert.equal((await send(admin, "PATCH", `/api/admin/departments/${salesId}`, { name: "Ventes Québec" })).status, 200);
+  assert.equal((await database.getDepartment(salesId)).name, "Ventes Québec");
+  assert.equal((await send(admin, "DELETE", `/api/admin/departments/${financeId}`)).status, 409);
+
+  // Managers: edit, then delete. The deleted manager is signed out and hidden, the order stays.
+  const productId = await database.createProduct("Papier", "", 100, financeId, null, 1);
+  const order = await postJson(baseUrl, manager.cookie, manager.csrfToken, "/api/orders", {
+    items: [{ productId, quantity: 1 }]
+  });
+  assert.equal(order.status, 201);
+  const managerId = (await database.getUserByEmail("finance@example.ca")).id;
+  assert.equal((await send(admin, "PATCH", `/api/admin/users/${managerId}`, {
+    fullName: "Julie Tremblay", departmentId: salesId
+  })).status, 200);
+  assert.equal((await database.getUserById(managerId)).department_id, salesId);
+  assert.equal((await send(admin, "DELETE", `/api/admin/users/${managerId}`)).status, 204);
+  assert.equal((await fetch(`${baseUrl}/api/auth/me`, { headers: { Cookie: manager.cookie } })).status, 401);
+  const users = await (await fetch(`${baseUrl}/api/admin/users`, { headers: { Cookie: admin.cookie } })).json();
+  assert.equal(users.users.some((user) => user.email === "finance@example.ca"), false);
+  const orders = await (await fetch(`${baseUrl}/api/orders`, { headers: { Cookie: admin.cookie } })).json();
+  assert.equal(orders.orders.length, 1);
+
+  // With its pending order decided and no manager left, Finance can be deleted.
+  assert.equal((await send(admin, "DELETE", `/api/admin/departments/${financeId}`)).status, 409);
+  assert.equal((await patchJson(baseUrl, admin.cookie, admin.csrfToken, `/api/admin/orders/${orders.orders[0].id}`, {
+    status: "approved"
+  })).status, 200);
+  assert.equal((await send(admin, "DELETE", `/api/admin/departments/${financeId}`)).status, 204);
+  assert.equal(await database.getDepartment(financeId), undefined);
+  assert.equal(await database.getProduct(productId), false);
+  const history = await (await fetch(`${baseUrl}/api/orders`, { headers: { Cookie: admin.cookie } })).json();
+  assert.equal(history.orders[0].departmentName, "Finance");
+});
+
+test("the developer only invites and removes the company's administrators", async (t) => {
+  const sentMessages = [];
+  const { app, baseUrl } = await startApp(t, {
+    sendInvitationEmail: async (message) => sentMessages.push(message)
+  });
+  const database = app.locals.database;
+  const developerId = database.nextUserId++;
+  database.users.set(developerId, {
+    id: developerId,
+    email: "dev@example.ca",
+    password_hash: await argon2.hash("developer-test-password"),
+    role: "developer",
+    department_id: null,
+    is_active: true
+  });
+  const { response, cookie } = await login(baseUrl, "dev@example.ca", "developer-test-password");
+  assert.equal(response.status, 200);
+  const csrf = await getCsrfToken(baseUrl, cookie);
+  const developer = { cookie: csrf.cookie, csrfToken: csrf.token };
+  const get = (session, url) => fetch(`${baseUrl}${url}`, { headers: { Cookie: session.cookie } });
+
+  // No access to the company's data.
+  for (const url of ["/api/orders", "/api/products", "/api/admin/users", "/api/admin/dashboard"]) {
+    assert.equal((await get(developer, url)).status, 403, url);
+  }
+  assert.equal((await get(developer, "/api/auth/me")).status, 200);
+
+  // Invite the company administrator, who chooses their own password.
+  const invite = await postJson(baseUrl, developer.cookie, developer.csrfToken, "/api/developer/admins", {
+    fullName: "Patron Promographe", email: "Patron@Example.ca"
+  });
+  assert.equal(invite.status, 202);
+  assert.equal(sentMessages[0].role, "admin");
+  const validate = await fetch(`${baseUrl}/api/invitations/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: sentMessages[0].token })
+  });
+  assert.deepEqual(await validate.json(), { email: "patron@example.ca", role: "admin", departmentName: "" });
+  const acceptCsrf = await getCsrfToken(baseUrl);
+  assert.equal((await postJson(baseUrl, acceptCsrf.cookie, acceptCsrf.token, "/api/invitations/accept", {
+    token: sentMessages[0].token, password: "the-boss-password"
+  })).status, 204);
+  const bossLogin = await login(baseUrl, "patron@example.ca", "the-boss-password");
+  assert.equal(bossLogin.response.status, 200);
+  const boss = { cookie: bossLogin.cookie };
+  assert.equal((await get(boss, "/api/admin/dashboard?year=2026")).status, 200);
+  assert.equal((await get(boss, "/api/developer/admins")).status, 403);
+
+  // An active account cannot be invited again; removing the administrator signs them out.
+  assert.equal((await postJson(baseUrl, developer.cookie, developer.csrfToken, "/api/developer/admins", {
+    fullName: "Patron", email: "patron@example.ca"
+  })).status, 409);
+  const admins = (await (await get(developer, "/api/developer/admins")).json()).admins;
+  const bossId = admins.find((admin) => admin.email === "patron@example.ca").id;
+  const removal = await fetch(`${baseUrl}/api/developer/admins/${bossId}`, {
+    method: "DELETE",
+    headers: { Cookie: developer.cookie, "X-CSRF-Token": developer.csrfToken }
+  });
+  assert.equal(removal.status, 204);
+  assert.equal((await get(boss, "/api/auth/me")).status, 401);
+});
+
+test("email delivery can use Azure Communication Services instead of SMTP", () => {
+  assert.equal(createInvitationMailer({}).configured, false);
+  assert.equal(createInvitationMailer({ ACS_EMAIL_ENDPOINT: "https://acs.example" }).configured, false);
+  assert.equal(createInvitationMailer({
+    ACS_EMAIL_FROM: "DoNotReply@example.azurecomm.net",
+    ACS_EMAIL_ENDPOINT: "https://acs.example.communication.azure.com"
+  }).configured, true);
+  assert.equal(createInvitationMailer({
+    ACS_EMAIL_FROM: "DoNotReply@example.azurecomm.net",
+    ACS_EMAIL_CONNECTION_STRING: "endpoint=https://acs.example.communication.azure.com/;accesskey=dGVzdA=="
+  }).configured, true);
+});
+
+function fakeMicrosoftAuth(claimsByCode) {
+  return {
+    tenantId: "tenant-123",
+    generatePkceCodes: async () => ({ verifier: "test-verifier", challenge: "test-challenge" }),
+    getAuthCodeUrl: async ({ state, loginHint }) =>
+      `https://login.example/authorize?state=${state}${loginHint ? `&login_hint=${loginHint}` : ""}`,
+    exchangeCode: async ({ code, codeVerifier }) => {
+      assert.equal(codeVerifier, "test-verifier");
+      if (!claimsByCode[code]) {
+        throw Object.assign(new Error("invalid_grant"), { errorCode: "invalid_grant" });
+      }
+      return claimsByCode[code];
+    }
+  };
+}
+
+async function microsoftSignIn(baseUrl, code, stateOverride) {
+  const start = await fetch(`${baseUrl}/api/auth/microsoft/login`, { redirect: "manual" });
+  assert.equal(start.status, 302);
+  const cookie = sessionCookie(start);
+  const state = stateOverride ?? new URL(start.headers.get("location")).searchParams.get("state");
+  const callback = await fetch(
+    `${baseUrl}/api/auth/microsoft/callback?code=${code}&state=${state}`,
+    { headers: { Cookie: cookie }, redirect: "manual" }
+  );
+  return {
+    location: callback.headers.get("location"),
+    cookie: callback.headers.get("set-cookie") ? sessionCookie(callback) : cookie
+  };
+}
+
+test("Microsoft sign-in is hidden when it is not configured", async (t) => {
+  const { baseUrl } = await startApp(t);
+  const providers = await fetch(`${baseUrl}/api/auth/providers`);
+  assert.deepEqual(await providers.json(), { microsoft: false, microsoftDomains: [] });
+  const start = await fetch(`${baseUrl}/api/auth/microsoft/login`, { redirect: "manual" });
+  assert.equal(start.headers.get("location"), "/login.html?error=microsoft_unavailable");
+});
+
+test("Microsoft sign-in only admits invited accounts from the configured tenant", async (t) => {
+  const { app, baseUrl } = await startApp(t, {
+    microsoftAuth: fakeMicrosoftAuth({
+      admin: { tid: "TENANT-123", preferred_username: ADMIN_EMAIL.toUpperCase() },
+      stranger: { tid: "tenant-123", preferred_username: "stranger@example.ca" },
+      otherTenant: { tid: "tenant-999", preferred_username: ADMIN_EMAIL },
+      invited: { tid: "tenant-123", preferred_username: "invited@example.ca" }
+    })
+  });
+  assert.deepEqual(
+    await (await fetch(`${baseUrl}/api/auth/providers`)).json(),
+    { microsoft: true, microsoftDomains: [] }
+  );
+
+  const admin = await microsoftSignIn(baseUrl, "admin");
+  assert.equal(admin.location, "/");
+  const me = await fetch(`${baseUrl}/api/auth/me`, { headers: { Cookie: admin.cookie } });
+  assert.equal((await me.json()).user.email, ADMIN_EMAIL);
+
+  assert.equal((await microsoftSignIn(baseUrl, "stranger")).location, "/login.html?error=microsoft_not_invited");
+  assert.equal((await microsoftSignIn(baseUrl, "otherTenant")).location, "/login.html?error=microsoft_not_invited");
+  assert.equal((await microsoftSignIn(baseUrl, "bad-code")).location, "/login.html?error=microsoft_failed");
+  assert.equal((await microsoftSignIn(baseUrl, "admin", "forged")).location, "/login.html?error=microsoft_expired");
+
+  const departmentId = await app.locals.database.createDepartment("Finance");
+  const invitedId = await app.locals.database.createPendingManager(
+    "invited@example.ca", await argon2.hash("unused-password"), departmentId, "Invitée Test"
+  );
+  await app.locals.database.createInvitation(invitedId, "a".repeat(64), Date.now() + 60000);
+  const invited = await microsoftSignIn(baseUrl, "invited");
+  assert.equal(invited.location, "/");
+  assert.equal((await app.locals.database.getUserById(invitedId)).is_active, true);
+});
+
+test("Company email domains must sign in with Microsoft instead of a password", async (t) => {
+  const { baseUrl } = await startApp(t, {
+    env: { NODE_ENV: "test", AUTH_MICROSOFT_DOMAINS: " @Example.ca , other.example " },
+    microsoftAuth: fakeMicrosoftAuth({})
+  });
+  assert.deepEqual(
+    await (await fetch(`${baseUrl}/api/auth/providers`)).json(),
+    { microsoft: true, microsoftDomains: ["example.ca", "other.example"] }
+  );
+
+  const csrf = await getCsrfToken(baseUrl);
+  const response = await postJson(baseUrl, csrf.cookie, csrf.token, "/api/auth/login", {
+    email: ADMIN_EMAIL,
+    password: ADMIN_PASSWORD
+  });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).microsoft, true);
+
+  const start = await fetch(
+    `${baseUrl}/api/auth/microsoft/login?login_hint=${encodeURIComponent(ADMIN_EMAIL.toUpperCase())}`,
+    { redirect: "manual" }
+  );
+  assert.equal(new URL(start.headers.get("location")).searchParams.get("login_hint"), ADMIN_EMAIL);
+  const invalidHint = await fetch(`${baseUrl}/api/auth/microsoft/login?login_hint=nope`, { redirect: "manual" });
+  assert.equal(new URL(invalidHint.headers.get("location")).searchParams.get("login_hint"), null);
+});
+
+test("Microsoft domains are ignored when Microsoft sign-in is not configured", async (t) => {
+  const { baseUrl } = await startApp(t, { env: { NODE_ENV: "test", AUTH_MICROSOFT_DOMAINS: "example.ca" } });
+  const csrf = await getCsrfToken(baseUrl);
+  const response = await postJson(baseUrl, csrf.cookie, csrf.token, "/api/auth/login", {
+    email: ADMIN_EMAIL,
+    password: ADMIN_PASSWORD
+  });
+  assert.equal(response.status, 200);
 });

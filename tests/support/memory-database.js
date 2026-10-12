@@ -7,6 +7,7 @@ class MemoryDatabase {
     this.nextOrderId = 1;
     this.nextSupplierId = 1;
     this.suppliers = new Map();
+    this.passwordResets = [];
     this.departments = new Map();
     this.users = new Map();
     this.invitations = new Map();
@@ -22,25 +23,183 @@ class MemoryDatabase {
     return this.users.get(Number(id));
   }
 
+  async updateUserFullName(userId, fullName) {
+    this.users.get(Number(userId)).full_name = fullName;
+  }
+
+  async updatePassword(userId, passwordHash) {
+    const user = this.users.get(Number(userId));
+    if (!user || !user.is_active) {
+      return null;
+    }
+    user.password_hash = passwordHash;
+    user.session_version = (user.session_version || 0) + 1;
+    return user.session_version;
+  }
+
+  async activateInvitedUser(userId, now) {
+    const user = this.users.get(Number(userId));
+    const invitations = [...this.invitations.values()]
+      .filter((invitation) => invitation.user_id === Number(userId) && invitation.used_at === null);
+    if (!user || user.is_active || !invitations.some((invitation) => invitation.expires_at > now)) {
+      return false;
+    }
+    user.is_active = true;
+    invitations.forEach((invitation) => { invitation.used_at = now; });
+    return true;
+  }
+
+  async createPasswordReset(userId, tokenHash, expiresAt, now) {
+    this.passwordResets
+      .filter((reset) => reset.user_id === userId && reset.used_at === null)
+      .forEach((reset) => { reset.used_at = now; });
+    this.passwordResets.push({ user_id: userId, token_hash: tokenHash, expires_at: expiresAt, used_at: null });
+  }
+
+  findUsablePasswordReset(tokenHash, now) {
+    const reset = this.passwordResets.find((candidate) => (
+      candidate.token_hash === tokenHash && candidate.used_at === null && candidate.expires_at > now
+    ));
+    const user = reset && this.users.get(reset.user_id);
+    return reset && user && user.is_active ? { reset, user } : undefined;
+  }
+
+  async getPasswordReset(tokenHash, now) {
+    const match = this.findUsablePasswordReset(tokenHash, now);
+    return match && { email: match.user.email };
+  }
+
+  async completePasswordReset(tokenHash, passwordHash, now) {
+    const match = this.findUsablePasswordReset(tokenHash, now);
+    if (!match) {
+      return false;
+    }
+    await this.updatePassword(match.user.id, passwordHash);
+    this.passwordResets
+      .filter((reset) => reset.user_id === match.user.id && reset.used_at === null)
+      .forEach((reset) => { reset.used_at = now; });
+    return true;
+  }
+
   async listUsers() {
-    return [...this.users.values()].map(({ password_hash, ...user }) => user);
+    return [...this.users.values()]
+      .filter((user) => !user.deleted)
+      .map(({ password_hash, deleted, ...user }) => user);
+  }
+
+  async updateManager(id, fullName, departmentId) {
+    const user = this.users.get(Number(id));
+    if (!user || user.role !== "department_manager" || user.deleted) {
+      return false;
+    }
+    Object.assign(user, { full_name: fullName, department_id: Number(departmentId) });
+    return true;
+  }
+
+  async listAdmins() {
+    return [...this.users.values()]
+      .filter((user) => user.role === "admin" && !user.deleted)
+      .map((user) => ({ id: user.id, email: user.email, full_name: user.full_name ?? "", is_active: user.is_active }));
+  }
+
+  async createPendingAdmin(email, passwordHash, fullName) {
+    if (await this.getUserByEmail(email)) {
+      throw Object.assign(new Error("duplicate user"), { number: 2627 });
+    }
+    const id = this.nextUserId++;
+    this.users.set(id, {
+      id, email, password_hash: passwordHash, role: "admin", department_id: null, full_name: fullName, is_active: false
+    });
+    return id;
+  }
+
+  async updatePendingAdmin(userId, fullName) {
+    const user = this.users.get(Number(userId));
+    if (user && user.role === "admin" && !user.is_active) {
+      Object.assign(user, { full_name: fullName, deleted: false });
+    }
+  }
+
+  async deleteManager(id) {
+    return this.deleteUserWithRole(id, "department_manager");
+  }
+
+  async deleteAdmin(id) {
+    return this.deleteUserWithRole(id, "admin");
+  }
+
+  async deleteUserWithRole(id, role) {
+    const user = this.users.get(Number(id));
+    if (!user || user.role !== role || user.deleted) {
+      return false;
+    }
+    Object.assign(user, {
+      deleted: true,
+      is_active: false,
+      session_version: (user.session_version || 0) + 1
+    });
+    for (const [invitationId, invitation] of this.invitations) {
+      if (invitation.user_id === user.id) {
+        this.invitations.delete(invitationId);
+      }
+    }
+    this.passwordResets = this.passwordResets.filter((reset) => reset.user_id !== user.id);
+    return true;
   }
 
   async listDepartments() {
-    return [...this.departments.values()];
+    return [...this.departments.values()].filter((department) => !department.deleted);
   }
 
   async getDepartment(id) {
-    return this.departments.get(Number(id));
+    const department = this.departments.get(Number(id));
+    return department && !department.deleted ? department : undefined;
   }
 
   async createDepartment(name) {
-    if ([...this.departments.values()].some((department) => department.name === name)) {
+    const existing = [...this.departments.values()].find((department) => department.name === name);
+    if (existing?.deleted) {
+      existing.deleted = false;
+      return existing.id;
+    }
+    if (existing) {
       throw Object.assign(new Error("duplicate department"), { number: 2627 });
     }
     const id = this.nextDepartmentId++;
     this.departments.set(id, { id, name });
     return id;
+  }
+
+  async renameDepartment(id, name) {
+    const department = await this.getDepartment(id);
+    if (!department) {
+      return false;
+    }
+    if ([...this.departments.values()].some((other) => other.name === name && other.id !== department.id)) {
+      throw Object.assign(new Error("duplicate department"), { number: 2627 });
+    }
+    department.name = name;
+    return true;
+  }
+
+  async deleteDepartment(id) {
+    const department = await this.getDepartment(id);
+    if (!department) {
+      return "not_found";
+    }
+    if ([...this.users.values()].some((user) => user.department_id === department.id && !user.deleted)) {
+      return "has_managers";
+    }
+    if ([...this.orders.values()].some((order) => order.department_id === department.id && order.status === "pending")) {
+      return "has_pending_orders";
+    }
+    for (const product of this.products.values()) {
+      if (product.department_id === department.id) {
+        Object.assign(product, { deleted: true, is_active: false });
+      }
+    }
+    department.deleted = true;
+    return "deleted";
   }
 
   async updateDepartmentBudget(id, budgetCents) {
@@ -56,20 +215,12 @@ class MemoryDatabase {
     const orders = [...this.orders.values()]
       .filter((order) => new Date(order.created_at).getFullYear() === year);
     const total = (order) => order.items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
-    const supplierTotals = new Map();
-    orders.filter((order) => order.status === "approved").forEach((order) => {
-      order.items.forEach((item) => {
-        const supplierId = this.products.get(item.productId)?.supplier_id;
-        const name = this.suppliers.get(supplierId)?.name ?? null;
-        supplierTotals.set(name, (supplierTotals.get(name) || 0) + item.priceCents * item.quantity);
-      });
-    });
     const orderCounts = {};
     orders.forEach((order) => {
       orderCounts[order.status] = (orderCounts[order.status] || 0) + 1;
     });
     return {
-      departments: [...this.departments.values()].map((department) => {
+      departments: (await this.listDepartments()).map((department) => {
         const departmentOrders = orders.filter((order) => order.department_id === department.id);
         const sumFor = (status) => departmentOrders
           .filter((order) => order.status === status)
@@ -83,8 +234,6 @@ class MemoryDatabase {
           pendingOrders: departmentOrders.filter((order) => order.status === "pending").length
         };
       }),
-      suppliers: [...supplierTotals].map(([name, approvedCents]) => ({ name, approvedCents }))
-        .sort((a, b) => b.approvedCents - a.approvedCents),
       orderCounts
     };
   }
@@ -110,6 +259,18 @@ class MemoryDatabase {
     const id = this.nextSupplierId++;
     this.suppliers.set(id, { id, name, contact_name: contactName, email, phone });
     return id;
+  }
+
+  async updateSupplier(id, name, contactName, email, phone) {
+    const supplier = this.suppliers.get(Number(id));
+    if (!supplier) {
+      return false;
+    }
+    if ([...this.suppliers.values()].some((other) => other.name === name && other.id !== supplier.id)) {
+      throw Object.assign(new Error("duplicate supplier"), { number: 2627 });
+    }
+    Object.assign(supplier, { name, contact_name: contactName, email, phone });
+    return true;
   }
 
   async getInviteUser(email) {
@@ -177,6 +338,7 @@ class MemoryDatabase {
     if (user && !user.is_active) {
       user.department_id = departmentId;
       user.full_name = fullName;
+      user.deleted = false;
     }
   }
 
@@ -198,8 +360,7 @@ class MemoryDatabase {
     const invitation = [...this.invitations.values()]
       .find((entry) => entry.token_hash === tokenHash);
     const user = invitation && this.users.get(invitation.user_id);
-    const department = user && this.departments.get(user.department_id);
-    if (!invitation || !user || user.is_active || !department) {
+    if (!invitation || !user || user.is_active) {
       return undefined;
     }
     return {
@@ -207,7 +368,8 @@ class MemoryDatabase {
       expires_at: invitation.expires_at,
       used_at: invitation.used_at,
       email: user.email,
-      department_name: department.name
+      role: user.role,
+      department_name: this.departments.get(user.department_id)?.name ?? null
     };
   }
 
@@ -230,8 +392,9 @@ class MemoryDatabase {
 
   async listProducts(user) {
     return [...this.products.values()]
+      .filter((product) => !product.deleted)
       .filter((product) => user.role === "admin" || product.department_id === Number(user.department_id))
-      .map((product) => ({
+      .map(({ deleted, ...product }) => ({
         ...product,
         department_name: this.departments.get(product.department_id)?.name ?? null,
         supplier_name: this.suppliers.get(product.supplier_id)?.name ?? null
@@ -240,7 +403,7 @@ class MemoryDatabase {
 
   async getProduct(id) {
     const product = this.products.get(Number(id));
-    return product && {
+    return product && !product.deleted && {
       id: product.id,
       department_id: product.department_id,
       supplier_id: product.supplier_id
@@ -264,7 +427,7 @@ class MemoryDatabase {
 
   async updateProduct(id, name, description, priceCents, departmentId, supplierId, isActive) {
     const product = this.products.get(Number(id));
-    if (!product) {
+    if (!product || product.deleted) {
       return false;
     }
     Object.assign(product, {
@@ -276,6 +439,24 @@ class MemoryDatabase {
       is_active: isActive
     });
     return true;
+  }
+
+  async deleteProduct(id) {
+    const product = this.products.get(Number(id));
+    if (!product || product.deleted) {
+      return false;
+    }
+    Object.assign(product, { deleted: true, is_active: false });
+    return true;
+  }
+
+  async deleteSupplier(id) {
+    for (const product of this.products.values()) {
+      if (product.supplier_id === Number(id)) {
+        product.supplier_id = null;
+      }
+    }
+    return this.suppliers.delete(Number(id));
   }
 
   async createOrder(departmentId, userId, notes, items) {

@@ -3,6 +3,152 @@ const path = require("path");
 const sql = require("mssql");
 const { useIdentityPlugin } = require("@azure/identity");
 
+// Pending request lines grouped per supplier (by id, or by saved name when the supplier is gone).
+function groupBySupplier(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const supplierId = item.supplier_id === null || item.supplier_id === undefined ? null : Number(item.supplier_id);
+    const supplierName = item.supplier_name ?? null;
+    const key = supplierId === null ? `name:${supplierName || ""}` : `id:${supplierId}`;
+    if (!groups.has(key)) {
+      groups.set(key, { supplierId, supplierName, itemIds: [] });
+    }
+    groups.get(key).itemIds.push(Number(item.id));
+  }
+  return [...groups.values()];
+}
+
+// Optional supplier card fields, in column order.
+function supplierDetailValues(details) {
+  return [
+    details.phoneExtension || "",
+    details.note || "",
+    details.reducedThresholdCents ?? null,
+    details.freeThresholdCents ?? null,
+    details.accountNumber || "",
+    details.currency || "CAD",
+    details.paymentTerms || "",
+    details.isAuthorized !== false,
+    details.category || ""
+  ];
+}
+
+// Day of a request's number, in Quebec time: DEM-AAAA-MMJJ.
+function orderNumberBase(date) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+  return `DEM-${parts.year}-${parts.month}${parts.day}`;
+}
+
+// Counter of the day: DEM-2026-1015-1, -2, … -10; it starts again at 1 the next day.
+function nextOrderNumber(base, existingNumbers) {
+  const used = existingNumbers
+    .filter((number) => number && number.startsWith(`${base}-`))
+    .map((number) => number.slice(base.length + 1))
+    .filter((suffix) => /^\d+$/.test(suffix))
+    .map(Number);
+  return `${base}-${used.length ? Math.max(...used) + 1 : 1}`;
+}
+
+// Year of a purchase order's number, in Quebec time: PG-AAAA.
+function purchaseOrderNumberBase(date) {
+  const year = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric" }).format(date);
+  return `PG-${year}`;
+}
+
+// Counter of the year on five digits: PG-202600001, PG-202600002, …; it starts again at
+// 00001 each year.
+function nextPurchaseOrderNumber(base, existingNumbers) {
+  const used = existingNumbers
+    .filter((number) => number && number.startsWith(base))
+    .map((number) => number.slice(base.length))
+    .filter((suffix) => /^\d{5,}$/.test(suffix))
+    .map(Number);
+  return `${base}${String(used.length ? Math.max(...used) + 1 : 1).padStart(5, "0")}`;
+}
+
+// Turns flat purchase-order rows into one object per purchase order: quantities summed per
+// product and price, the detail per request, and the requests included.
+function groupPurchaseOrders(rows) {
+  const purchaseOrders = new Map();
+  for (const row of rows) {
+    const id = Number(row.id);
+    if (!purchaseOrders.has(id)) {
+      purchaseOrders.set(id, {
+        id,
+        number: row.number,
+        supplierName: row.supplier_name || null,
+        status: row.status,
+        createdAt: row.created_at,
+        purchasedAt: row.purchased_at,
+        purchasedByEmail: row.purchased_by_email || null,
+        sentAt: row.sent_at || null,
+        sentByEmail: row.sent_by_email || null,
+        sentMethod: row.sent_method || null,
+        sentNote: row.sent_note || null,
+        supplier: {
+          contactName: row.supplier_contact || "",
+          email: row.supplier_email || "",
+          phone: row.supplier_phone || "",
+          website: row.supplier_website || "",
+          orderMethod: row.supplier_order_method || "",
+          phoneExtension: row.supplier_phone_extension || "",
+          note: row.supplier_note || "",
+          reducedThresholdCents: row.supplier_reduced_threshold_cents == null ? null : Number(row.supplier_reduced_threshold_cents),
+          freeThresholdCents: row.supplier_free_threshold_cents == null ? null : Number(row.supplier_free_threshold_cents),
+          accountNumber: row.supplier_account_number || "",
+          currency: row.supplier_currency || "CAD",
+          paymentTerms: row.supplier_payment_terms || "",
+          isAuthorized: row.supplier_is_authorized == null ? true : Boolean(row.supplier_is_authorized),
+          category: row.supplier_category || ""
+        },
+        isUrgent: false,
+        lines: [],
+        orders: [],
+        totalCents: 0
+      });
+    }
+    const purchaseOrder = purchaseOrders.get(id);
+    const productId = Number(row.product_id);
+    const priceCents = Number(row.price_cents);
+    const quantity = Number(row.quantity);
+    const orderId = Number(row.order_id);
+    const unit = row.unit || "unité";
+    const sku = row.sku || "";
+    let line = purchaseOrder.lines.find((candidate) => candidate.productId === productId &&
+      candidate.priceCents === priceCents && candidate.unit === unit && candidate.sku === sku);
+    if (!line) {
+      line = { productId, productName: row.product_name, sku, description: row.product_description || "", priceCents, unit, quantity: 0, detail: [] };
+      purchaseOrder.lines.push(line);
+    }
+    line.quantity += quantity;
+    const orderNumber = row.order_number || `DEM-${orderId}`;
+    line.detail.push({ orderId, orderNumber, requester: row.requester, quantity });
+    purchaseOrder.totalCents += priceCents * quantity;
+    purchaseOrder.isUrgent = purchaseOrder.isUrgent || Boolean(row.is_urgent);
+    if (!purchaseOrder.orders.some((order) => order.id === orderId)) {
+      purchaseOrder.orders.push({
+        id: orderId,
+        number: orderNumber,
+        requester: row.requester,
+        departmentName: row.department_name,
+        isUrgent: Boolean(row.is_urgent),
+        clientName: row.client_name || null,
+        approvedBy: row.approved_by || null,
+        approvedByDirector: row.approved_by_role === "admin"
+      });
+    }
+  }
+  return [...purchaseOrders.values()];
+}
+
+// Roles that see every department's catalogue and requests.
+const SEES_ALL_ROLES = ["admin", "accountant"];
+
 const MIGRATIONS = [
   { version: 1, path: path.join(__dirname, "..", "migrations", "001_auth_and_invitations.sql") },
   { version: 2, path: path.join(__dirname, "..", "migrations", "002_products_and_orders.sql") },
@@ -13,7 +159,25 @@ const MIGRATIONS = [
   { version: 7, path: path.join(__dirname, "..", "migrations", "007_password_resets.sql") },
   { version: 8, path: path.join(__dirname, "..", "migrations", "008_product_deletion.sql") },
   { version: 9, path: path.join(__dirname, "..", "migrations", "009_soft_delete_users_departments.sql") },
-  { version: 10, path: path.join(__dirname, "..", "migrations", "010_developer_role.sql") }
+  { version: 10, path: path.join(__dirname, "..", "migrations", "010_developer_role.sql") },
+  { version: 11, path: path.join(__dirname, "..", "migrations", "011_employees_and_functions.sql") },
+  { version: 12, path: path.join(__dirname, "..", "migrations", "012_manager_requests.sql") },
+  { version: 13, path: path.join(__dirname, "..", "migrations", "013_accountant_role.sql") },
+  { version: 14, path: path.join(__dirname, "..", "migrations", "014_hard_delete_accounts.sql") },
+  { version: 15, path: path.join(__dirname, "..", "migrations", "015_urgent_and_purchase.sql") },
+  { version: 16, path: path.join(__dirname, "..", "migrations", "016_purchase_orders.sql") },
+  { version: 17, path: path.join(__dirname, "..", "migrations", "017_order_numbers.sql") },
+  { version: 18, path: path.join(__dirname, "..", "migrations", "018_purchase_order_numbers.sql") },
+  { version: 19, path: path.join(__dirname, "..", "migrations", "019_daily_numbers.sql") },
+  { version: 20, path: path.join(__dirname, "..", "migrations", "020_purchase_order_sending.sql") },
+  { version: 21, path: path.join(__dirname, "..", "migrations", "021_supplier_details.sql") },
+  { version: 22, path: path.join(__dirname, "..", "migrations", "022_supplier_terms.sql") },
+  { version: 23, path: path.join(__dirname, "..", "migrations", "023_external_orders.sql") },
+  { version: 24, path: path.join(__dirname, "..", "migrations", "024_units.sql") },
+  { version: 25, path: path.join(__dirname, "..", "migrations", "025_purchaser_role.sql") },
+  { version: 26, path: path.join(__dirname, "..", "migrations", "026_purchase_order_year_numbers.sql") },
+  { version: 27, path: path.join(__dirname, "..", "migrations", "027_order_methods.sql") },
+  { version: 28, path: path.join(__dirname, "..", "migrations", "028_product_sku.sql") }
 ];
 
 // VS Code sign-in is for local development only; its keychain library is absent on App Service,
@@ -47,8 +211,16 @@ function createSqlConfig(env) {
       trustServerCertificate: false,
       enableArithAbort: true
     },
-    pool: { min: 0, max: 10, idleTimeoutMillis: 30000 },
-    connectionTimeout: 60000,
+    // The serverless database auto-pauses to stay on the free offer; waking it up can take
+    // about a minute, longer than the 30-second pool defaults.
+    pool: {
+      min: 0,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      acquireTimeoutMillis: 120000,
+      createTimeoutMillis: 120000
+    },
+    connectionTimeout: 120000,
     requestTimeout: 30000
   };
 }
@@ -249,17 +421,95 @@ class AzureDatabase {
   async listUsers() {
     const result = await this.query(`
       SELECT Id AS id, Email AS email, FullName AS full_name, Role AS role,
-        DepartmentId AS department_id, IsActive AS is_active, CreatedAt AS created_at
+        DepartmentId AS department_id, IsActive AS is_active, CreatedAt AS created_at,
+        RequestedManagerDepartmentId AS requested_manager_department_id
       FROM dbo.PromographeUsers WHERE DeletedAt IS NULL ORDER BY Id
     `);
-    return result.recordset;
+    const functions = await this.query("SELECT UserId AS user_id, FunctionCode AS code FROM dbo.PromographeUserFunctions");
+    return result.recordset.map((user) => ({
+      ...user,
+      functions: functions.recordset
+        .filter((row) => Number(row.user_id) === Number(user.id))
+        .map((row) => row.code)
+    }));
   }
 
-  async updateManager(id, fullName, departmentId) {
+  // Employees must keep a department; administrators may have one or none.
+  async updateUserDetails(id, fullName, departmentId) {
     const result = await this.query(`
       UPDATE dbo.PromographeUsers SET FullName = ?, DepartmentId = ?
-      WHERE Id = ? AND Role = N'department_manager' AND DeletedAt IS NULL
+      WHERE Id = ? AND Role IN (N'employee', N'admin', N'accountant', N'purchaser') AND DeletedAt IS NULL
     `, [fullName, departmentId, id]);
+    return result.rowsAffected[0] > 0;
+  }
+
+  // Switches a staff member between employee, accountant and purchaser (never to or from director).
+  async updateStaffRole(id, role) {
+    const result = await this.query(`
+      UPDATE dbo.PromographeUsers SET Role = ?
+      WHERE Id = ? AND Role IN (N'employee', N'accountant', N'purchaser') AND DeletedAt IS NULL
+    `, [role, id]);
+    return result.rowsAffected[0] > 0;
+  }
+
+  async getUserFunctions(userId) {
+    const result = await this.query(
+      "SELECT FunctionCode AS code FROM dbo.PromographeUserFunctions WHERE UserId = ? ORDER BY FunctionCode",
+      [userId]
+    );
+    return result.recordset.map((row) => row.code);
+  }
+
+  async setUserFunctions(userId, codes) {
+    const transaction = new sql.Transaction(this.pool);
+    await transaction.begin();
+    try {
+      await this.query("DELETE FROM dbo.PromographeUserFunctions WHERE UserId = ?", [userId], transaction);
+      for (const code of codes) {
+        await this.query(
+          "INSERT INTO dbo.PromographeUserFunctions (UserId, FunctionCode) VALUES (?, ?)",
+          [userId, code],
+          transaction
+        );
+      }
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+
+  async setManagerRequest(userId, departmentId) {
+    await this.query(
+      "UPDATE dbo.PromographeUsers SET RequestedManagerDepartmentId = ? WHERE Id = ?",
+      [departmentId, userId]
+    );
+  }
+
+  async getManagerRequest(userId) {
+    const result = await this.query(`
+      SELECT d.Id AS id, d.Name AS name
+      FROM dbo.PromographeUsers u
+      JOIN dbo.PromographeDepartments d ON d.Id = u.RequestedManagerDepartmentId AND d.DeletedAt IS NULL
+      WHERE u.Id = ? AND u.DeletedAt IS NULL
+    `, [userId]);
+    const department = result.recordset[0];
+    return department ? { id: Number(department.id), name: department.name } : null;
+  }
+
+  async getManagedDepartments(userId) {
+    const result = await this.query(`
+      SELECT Id AS id, Name AS name FROM dbo.PromographeDepartments
+      WHERE ManagerUserId = ? AND DeletedAt IS NULL ORDER BY Name
+    `, [userId]);
+    return result.recordset.map((department) => ({ id: Number(department.id), name: department.name }));
+  }
+
+  async setDepartmentManager(departmentId, userId) {
+    const result = await this.query(
+      "UPDATE dbo.PromographeDepartments SET ManagerUserId = ? WHERE Id = ? AND DeletedAt IS NULL",
+      [userId, departmentId]
+    );
     return result.rowsAffected[0] > 0;
   }
 
@@ -288,29 +538,59 @@ class AzureDatabase {
     `, [fullName, userId]);
   }
 
-  async deleteManager(id) {
-    return this.deleteUserWithRole(id, "department_manager");
+  async deleteEmployee(id) {
+    return this.deleteUserWithRole(id, "employee");
   }
 
   async deleteAdmin(id) {
     return this.deleteUserWithRole(id, "admin");
   }
 
-  // Signs the user out and blocks the account; their orders stay in the history.
-  // Inviting the same email again brings the account back.
+  // Removes the account from the database for good. Its purchase requests stay in the history
+  // with a copy of the name and email; invitations, resets and functions go with the account.
   async deleteUserWithRole(id, role) {
     const transaction = new sql.Transaction(this.pool);
     await transaction.begin();
     try {
-      const result = await this.query(`
-        UPDATE dbo.PromographeUsers
-        SET IsActive = 0, DeletedAt = SYSUTCDATETIME(), SessionVersion = SessionVersion + 1
-        WHERE Id = ? AND Role = ? AND DeletedAt IS NULL
-      `, [id, role], transaction);
-      await this.query("DELETE FROM dbo.PromographeInvitations WHERE UserId = ?", [id], transaction);
-      await this.query("DELETE FROM dbo.PromographePasswordResets WHERE UserId = ?", [id], transaction);
+      const found = await this.query(
+        "SELECT Id FROM dbo.PromographeUsers WITH (UPDLOCK) WHERE Id = ? AND Role = ?",
+        [id, role],
+        transaction
+      );
+      if (!found.recordset.length) {
+        await transaction.rollback();
+        return false;
+      }
+      await this.query(`
+        UPDATE o SET o.CreatedByEmailSnapshot = u.Email, o.CreatedByNameSnapshot = u.FullName, o.CreatedByUserId = NULL
+        FROM dbo.PromographeOrders o JOIN dbo.PromographeUsers u ON u.Id = o.CreatedByUserId
+        WHERE u.Id = ?
+      `, [id], transaction);
+      await this.query(`
+        UPDATE o SET o.DecidedByEmailSnapshot = u.Email, o.DecidedByUserId = NULL
+        FROM dbo.PromographeOrders o JOIN dbo.PromographeUsers u ON u.Id = o.DecidedByUserId
+        WHERE u.Id = ?
+      `, [id], transaction);
+      await this.query(`
+        UPDATE o SET o.PurchasedByEmailSnapshot = u.Email, o.PurchasedByUserId = NULL
+        FROM dbo.PromographeOrders o JOIN dbo.PromographeUsers u ON u.Id = o.PurchasedByUserId
+        WHERE u.Id = ?
+      `, [id], transaction);
+      await this.query(`
+        UPDATE po SET po.PurchasedByEmailSnapshot = u.Email, po.PurchasedByUserId = NULL
+        FROM dbo.PromographePurchaseOrders po JOIN dbo.PromographeUsers u ON u.Id = po.PurchasedByUserId
+        WHERE u.Id = ?
+      `, [id], transaction);
+      await this.query(`
+        UPDATE po SET po.SentByEmailSnapshot = u.Email, po.SentByUserId = NULL
+        FROM dbo.PromographePurchaseOrders po JOIN dbo.PromographeUsers u ON u.Id = po.SentByUserId
+        WHERE u.Id = ?
+      `, [id], transaction);
+      await this.query("UPDATE dbo.PromographeProducts SET CreatedByUserId = NULL WHERE CreatedByUserId = ?", [id], transaction);
+      await this.query("UPDATE dbo.PromographeDepartments SET ManagerUserId = NULL WHERE ManagerUserId = ?", [id], transaction);
+      await this.query("DELETE FROM dbo.PromographeUsers WHERE Id = ?", [id], transaction);
       await transaction.commit();
-      return result.rowsAffected[0] > 0;
+      return true;
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -318,10 +598,17 @@ class AzureDatabase {
   }
 
   async listDepartments() {
-    const result = await this.query(
-      "SELECT Id AS id, Name AS name FROM dbo.PromographeDepartments WHERE DeletedAt IS NULL ORDER BY Name"
-    );
-    return result.recordset;
+    const result = await this.query(`
+      SELECT d.Id AS id, d.Name AS name, d.ManagerUserId AS manager_user_id,
+        u.FullName AS manager_name, u.Email AS manager_email
+      FROM dbo.PromographeDepartments d
+      LEFT JOIN dbo.PromographeUsers u ON u.Id = d.ManagerUserId
+      WHERE d.DeletedAt IS NULL ORDER BY d.Name
+    `);
+    return result.recordset.map((department) => ({
+      ...department,
+      manager_user_id: department.manager_user_id === null ? null : Number(department.manager_user_id)
+    }));
   }
 
   async getDepartment(id) {
@@ -411,7 +698,7 @@ class AzureDatabase {
         SUM(CASE WHEN o.Status = N'pending' THEN i.UnitPriceCents * CAST(i.Quantity AS bigint) END) AS pending_cents,
         COUNT(DISTINCT CASE WHEN o.Status = N'pending' THEN o.Id END) AS pending_orders
       FROM dbo.PromographeDepartments d
-      LEFT JOIN dbo.PromographeOrders o ON o.DepartmentId = d.Id AND YEAR(o.CreatedAt) = ?
+      LEFT JOIN dbo.PromographeOrders o ON o.DepartmentId = d.Id AND YEAR(o.CreatedAt) = ? AND o.IsExternal = 0
       LEFT JOIN dbo.PromographeOrderItems i ON i.OrderId = o.Id
       WHERE d.DeletedAt IS NULL
       GROUP BY d.Id, d.Name, d.BudgetCents
@@ -422,7 +709,21 @@ class AzureDatabase {
       FROM dbo.PromographeOrders WHERE YEAR(CreatedAt) = ?
       GROUP BY Status
     `, [year]);
+    const external = (await this.query(`
+      SELECT
+        SUM(CASE WHEN o.Status = N'approved' THEN i.UnitPriceCents * CAST(i.Quantity AS bigint) END) AS approved_cents,
+        SUM(CASE WHEN o.Status = N'pending' THEN i.UnitPriceCents * CAST(i.Quantity AS bigint) END) AS pending_cents,
+        COUNT(DISTINCT CASE WHEN o.Status <> N'rejected' THEN o.Id END) AS orders
+      FROM dbo.PromographeOrders o
+      LEFT JOIN dbo.PromographeOrderItems i ON i.OrderId = o.Id
+      WHERE o.IsExternal = 1 AND YEAR(o.CreatedAt) = ?
+    `, [year])).recordset[0];
     return {
+      external: {
+        approvedCents: toNumber(external.approved_cents),
+        pendingCents: toNumber(external.pending_cents),
+        orders: toNumber(external.orders)
+      },
       departments: departments.recordset.map((row) => ({
         id: Number(row.id),
         name: row.name,
@@ -437,10 +738,20 @@ class AzureDatabase {
 
   async listSuppliers() {
     const result = await this.query(`
-      SELECT Id AS id, Name AS name, ContactName AS contact_name, Email AS email, Phone AS phone
+      SELECT Id AS id, Name AS name, ContactName AS contact_name, Email AS email, Phone AS phone,
+        Website AS website, OrderMethod AS order_method, PhoneExtension AS phone_extension, Note AS note,
+        ReducedShippingThresholdCents AS reduced_threshold_cents, FreeShippingThresholdCents AS free_threshold_cents,
+        AccountNumber AS account_number, Currency AS currency, PaymentTerms AS payment_terms,
+        IsAuthorized AS is_authorized, Category AS category
       FROM dbo.PromographeSuppliers ORDER BY Name
     `);
-    return result.recordset.map((supplier) => ({ ...supplier, id: Number(supplier.id) }));
+    return result.recordset.map((supplier) => ({
+      ...supplier,
+      id: Number(supplier.id),
+      is_authorized: Boolean(supplier.is_authorized),
+      reduced_threshold_cents: supplier.reduced_threshold_cents === null ? null : Number(supplier.reduced_threshold_cents),
+      free_threshold_cents: supplier.free_threshold_cents === null ? null : Number(supplier.free_threshold_cents)
+    }));
   }
 
   async getSupplier(id) {
@@ -460,20 +771,27 @@ class AzureDatabase {
     return supplier && { id: Number(supplier.id), name: supplier.name };
   }
 
-  async createSupplier(name, contactName, email, phone) {
+  // details: phoneExtension, note, reducedThresholdCents, freeThresholdCents, accountNumber,
+  // currency, paymentTerms, isAuthorized, category.
+  async createSupplier(name, contactName, email, phone, website = "", orderMethod = "", details = {}) {
     const result = await this.query(`
-      INSERT INTO dbo.PromographeSuppliers (Name, ContactName, Email, Phone)
+      INSERT INTO dbo.PromographeSuppliers (Name, ContactName, Email, Phone, Website, OrderMethod,
+        PhoneExtension, Note, ReducedShippingThresholdCents, FreeShippingThresholdCents,
+        AccountNumber, Currency, PaymentTerms, IsAuthorized, Category)
       OUTPUT INSERTED.Id AS id
-      VALUES (?, ?, ?, ?)
-    `, [name, contactName, email, phone]);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [name, contactName, email, phone, website, orderMethod, ...supplierDetailValues(details)]);
     return Number(result.recordset[0].id);
   }
 
-  async updateSupplier(id, name, contactName, email, phone) {
+  async updateSupplier(id, name, contactName, email, phone, website = "", orderMethod = "", details = {}) {
     const result = await this.query(`
-      UPDATE dbo.PromographeSuppliers SET Name = ?, ContactName = ?, Email = ?, Phone = ?
+      UPDATE dbo.PromographeSuppliers
+      SET Name = ?, ContactName = ?, Email = ?, Phone = ?, Website = ?, OrderMethod = ?,
+        PhoneExtension = ?, Note = ?, ReducedShippingThresholdCents = ?, FreeShippingThresholdCents = ?,
+        AccountNumber = ?, Currency = ?, PaymentTerms = ?, IsAuthorized = ?, Category = ?
       WHERE Id = ?
-    `, [name, contactName, email, phone, id]);
+    `, [name, contactName, email, phone, website, orderMethod, ...supplierDetailValues(details), id]);
     return result.rowsAffected[0] > 0;
   }
 
@@ -483,6 +801,8 @@ class AzureDatabase {
     await transaction.begin();
     try {
       await this.query("UPDATE dbo.PromographeProducts SET SupplierId = NULL WHERE SupplierId = ?", [id], transaction);
+      await this.query("UPDATE dbo.PromographePurchaseOrders SET SupplierId = NULL WHERE SupplierId = ?", [id], transaction);
+      await this.query("UPDATE dbo.PromographeOrderItems SET SupplierId = NULL WHERE SupplierId = ?", [id], transaction);
       const result = await this.query("DELETE FROM dbo.PromographeSuppliers WHERE Id = ?", [id], transaction);
       await transaction.commit();
       return result.rowsAffected[0] > 0;
@@ -504,7 +824,17 @@ class AzureDatabase {
     const result = await this.query(`
       INSERT INTO dbo.PromographeUsers (Email, PasswordHash, Role, DepartmentId, IsActive, FullName)
       OUTPUT INSERTED.Id AS id
-      VALUES (?, ?, N'department_manager', ?, 0, ?)
+      VALUES (?, ?, N'employee', ?, 0, ?)
+    `, [email, passwordHash, departmentId, fullName]);
+    return Number(result.recordset[0].id);
+  }
+
+  // Employee created on their first Microsoft sign-in; they never use a Promographe password.
+  async createMicrosoftEmployee(email, passwordHash, departmentId, fullName) {
+    const result = await this.query(`
+      INSERT INTO dbo.PromographeUsers (Email, PasswordHash, Role, DepartmentId, IsActive, FullName)
+      OUTPUT INSERTED.Id AS id
+      VALUES (?, ?, N'employee', ?, 1, ?)
     `, [email, passwordHash, departmentId, fullName]);
     return Number(result.recordset[0].id);
   }
@@ -611,13 +941,15 @@ class AzureDatabase {
   }
 
   async listProducts(user) {
-    const departmentFilter = user.role === "admin" ? "" : "AND p.DepartmentId = ?";
-    const parameters = user.role === "admin" ? [] : [user.department_id];
+    // The whole catalogue; server.js removes the prices for plain employees and keeps only
+    // their department's products for a responsable.
+    const departmentFilter = "";
+    const parameters = [];
     const result = await this.query(`
-      SELECT p.Id AS id, p.Name AS name, p.Description AS description,
-        p.UnitPriceCents AS price_cents, p.IsActive AS is_active,
+      SELECT p.Id AS id, p.Name AS name, p.Description AS description, p.Sku AS sku,
+        p.UnitPriceCents AS price_cents, p.IsActive AS is_active, p.Unit AS unit,
         p.DepartmentId AS department_id, d.Name AS department_name,
-        p.SupplierId AS supplier_id, s.Name AS supplier_name
+        p.SupplierId AS supplier_id, s.Name AS supplier_name, s.IsAuthorized AS supplier_authorized
       FROM dbo.PromographeProducts p
       LEFT JOIN dbo.PromographeDepartments d ON d.Id = p.DepartmentId
       LEFT JOIN dbo.PromographeSuppliers s ON s.Id = p.SupplierId
@@ -629,7 +961,8 @@ class AzureDatabase {
       price_cents: Number(product.price_cents),
       is_active: Boolean(product.is_active),
       department_id: product.department_id === null ? null : Number(product.department_id),
-      supplier_id: product.supplier_id === null ? null : Number(product.supplier_id)
+      supplier_id: product.supplier_id === null ? null : Number(product.supplier_id),
+      supplier_authorized: product.supplier_authorized === null ? true : Boolean(product.supplier_authorized)
     }));
   }
 
@@ -646,22 +979,22 @@ class AzureDatabase {
     };
   }
 
-  async createProduct(name, description, priceCents, departmentId, supplierId, createdByUserId, isActive = true) {
+  async createProduct(name, description, priceCents, departmentId, supplierId, createdByUserId, isActive = true, unit = "unité", sku = "") {
     const result = await this.query(`
       INSERT INTO dbo.PromographeProducts
-        (Name, Description, UnitPriceCents, DepartmentId, SupplierId, CreatedByUserId, IsActive)
+        (Name, Description, UnitPriceCents, DepartmentId, SupplierId, CreatedByUserId, IsActive, Unit, Sku)
       OUTPUT INSERTED.Id AS id
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [name, description, priceCents, departmentId, supplierId, createdByUserId, isActive]);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [name, description, priceCents, departmentId, supplierId, createdByUserId, isActive, unit, sku]);
     return Number(result.recordset[0].id);
   }
 
-  async updateProduct(id, name, description, priceCents, departmentId, supplierId, isActive) {
+  async updateProduct(id, name, description, priceCents, departmentId, supplierId, isActive, unit = "unité", sku = "") {
     const result = await this.query(`
       UPDATE dbo.PromographeProducts
-      SET Name = ?, Description = ?, UnitPriceCents = ?, DepartmentId = ?, SupplierId = ?, IsActive = ?
+      SET Name = ?, Description = ?, UnitPriceCents = ?, DepartmentId = ?, SupplierId = ?, IsActive = ?, Unit = ?, Sku = ?
       WHERE Id = ? AND DeletedAt IS NULL
-    `, [name, description, priceCents, departmentId, supplierId, isActive, id]);
+    `, [name, description, priceCents, departmentId, supplierId, isActive, unit, sku, id]);
     return result.rowsAffected[0] > 0;
   }
 
@@ -674,17 +1007,29 @@ class AzureDatabase {
     return result.rowsAffected[0] > 0;
   }
 
-  async createOrder(departmentId, userId, notes, items) {
+  async peekNextOrderNumber() {
+    const base = orderNumberBase(new Date());
+    const sameDay = (await this.query(
+      "SELECT OrderNumber AS number FROM dbo.PromographeOrders WHERE OrderNumber LIKE ?",
+      [`${base}-%`]
+    )).recordset.map((row) => row.number);
+    return nextOrderNumber(base, sameDay);
+  }
+
+  // client: { name, reference } for a request made for a client (outside the budgets).
+  async createOrder(departmentId, userId, notes, items, isUrgent = false, client = null) {
     const transaction = new sql.Transaction(this.pool);
     await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
     try {
       const products = [];
       for (const item of items) {
         const result = await this.query(`
-          SELECT Id AS id, Name AS name, UnitPriceCents AS price_cents
-          FROM dbo.PromographeProducts WITH (UPDLOCK, HOLDLOCK)
-          WHERE Id = ? AND IsActive = 1 AND DepartmentId = ?
-        `, [item.productId, departmentId], transaction);
+          SELECT p.Id AS id, p.Name AS name, p.UnitPriceCents AS price_cents, p.Unit AS unit, p.Sku AS sku,
+            p.SupplierId AS supplier_id, s.Name AS supplier_name
+          FROM dbo.PromographeProducts p WITH (UPDLOCK, HOLDLOCK)
+          LEFT JOIN dbo.PromographeSuppliers s ON s.Id = p.SupplierId
+          WHERE p.Id = ? AND p.IsActive = 1
+        `, [item.productId], transaction);
         if (!result.recordset.length) {
           await transaction.rollback();
           return null;
@@ -692,23 +1037,34 @@ class AzureDatabase {
         products.push(result.recordset[0]);
       }
 
+      const base = orderNumberBase(new Date());
+      const sameDay = (await this.query(`
+        SELECT OrderNumber AS number FROM dbo.PromographeOrders WITH (UPDLOCK, HOLDLOCK)
+        WHERE OrderNumber LIKE ?
+      `, [`${base}-%`], transaction)).recordset.map((row) => row.number);
       const created = await this.query(`
-        INSERT INTO dbo.PromographeOrders (DepartmentId, CreatedByUserId, Notes)
+        INSERT INTO dbo.PromographeOrders
+          (DepartmentId, CreatedByUserId, Notes, IsUrgent, OrderNumber, IsExternal, ClientName, ClientReference)
         OUTPUT INSERTED.Id AS id
-        VALUES (?, ?, ?)
-      `, [departmentId, userId, notes], transaction);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `, [departmentId, userId, notes, Boolean(isUrgent), nextOrderNumber(base, sameDay),
+        Boolean(client), client?.name || null, client?.reference || null], transaction);
       const orderId = Number(created.recordset[0].id);
       for (let index = 0; index < items.length; index += 1) {
         await this.query(`
           INSERT INTO dbo.PromographeOrderItems
-            (OrderId, ProductId, ProductName, UnitPriceCents, Quantity)
-          VALUES (?, ?, ?, ?, ?)
+            (OrderId, ProductId, ProductName, UnitPriceCents, Quantity, SupplierId, SupplierName, Unit, Sku)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           orderId,
           items[index].productId,
           products[index].name,
           Number(products[index].price_cents),
-          items[index].quantity
+          items[index].quantity,
+          products[index].supplier_id === null ? null : Number(products[index].supplier_id),
+          products[index].supplier_name ?? null,
+          items[index].unit || products[index].unit || "unité",
+          products[index].sku || ""
         ], transaction);
       }
       await transaction.commit();
@@ -719,22 +1075,38 @@ class AzureDatabase {
     }
   }
 
-  async listOrders(user) {
-    const departmentFilter = user.role === "admin" ? "" : "WHERE o.DepartmentId = ?";
-    const parameters = user.role === "admin" ? [] : [user.department_id];
+  // Director and accountant: every request. Responsable: every request of the departments
+  // they lead. Everyone also sees their own requests; an employee sees only those.
+  async listOrders(user, managedDepartmentIds = []) {
+    const departmentIds = [...new Set(managedDepartmentIds.map(Number))];
+    const seesAll = SEES_ALL_ROLES.includes(user.role);
+    const departmentFilter = seesAll
+      ? ""
+      : departmentIds.length
+        ? `WHERE (o.CreatedByUserId = ? OR o.DepartmentId IN (${departmentIds.map(() => "?").join(", ")}))`
+        : "WHERE o.CreatedByUserId = ?";
+    const parameters = seesAll ? [] : [Number(user.id), ...departmentIds];
     const result = await this.query(`
-      SELECT o.Id AS id, o.DepartmentId AS department_id, d.Name AS department_name,
-        u.Email AS created_by_email, u.FullName AS created_by_name,
+      SELECT o.Id AS id, o.OrderNumber AS order_number, o.DepartmentId AS department_id, d.Name AS department_name,
+        o.CreatedByUserId AS created_by_user_id,
+        COALESCE(u.Email, o.CreatedByEmailSnapshot) AS created_by_email,
+        COALESCE(u.FullName, o.CreatedByNameSnapshot) AS created_by_name,
         o.Status AS status, o.Notes AS notes,
         o.DecisionNote AS decision_note, o.CreatedAt AS created_at,
-        o.DecidedAt AS decided_at, reviewer.Email AS decided_by_email,
+        o.DecidedAt AS decided_at, COALESCE(reviewer.Email, o.DecidedByEmailSnapshot) AS decided_by_email,
+        o.IsUrgent AS is_urgent, o.PurchasedAt AS purchased_at,
+        o.IsExternal AS is_external, o.ClientName AS client_name, o.ClientReference AS client_reference,
+        COALESCE(purchaser.Email, o.PurchasedByEmailSnapshot) AS purchased_by_email,
         i.Id AS item_id, i.ProductId AS product_id, i.ProductName AS product_name,
-        i.UnitPriceCents AS price_cents, i.Quantity AS quantity
+        i.UnitPriceCents AS price_cents, i.Quantity AS quantity, i.Unit AS unit, i.Sku AS sku,
+        i.SupplierName AS supplier_name, po.Number AS purchase_order_number
       FROM dbo.PromographeOrders o
       JOIN dbo.PromographeDepartments d ON d.Id = o.DepartmentId
-      JOIN dbo.PromographeUsers u ON u.Id = o.CreatedByUserId
+      LEFT JOIN dbo.PromographeUsers u ON u.Id = o.CreatedByUserId
       LEFT JOIN dbo.PromographeUsers reviewer ON reviewer.Id = o.DecidedByUserId
+      LEFT JOIN dbo.PromographeUsers purchaser ON purchaser.Id = o.PurchasedByUserId
       LEFT JOIN dbo.PromographeOrderItems i ON i.OrderId = o.Id
+      LEFT JOIN dbo.PromographePurchaseOrders po ON po.Id = i.PurchaseOrderId
       ${departmentFilter}
       ORDER BY o.CreatedAt DESC, o.Id DESC, i.Id
     `, parameters);
@@ -744,8 +1116,10 @@ class AzureDatabase {
       if (!order) {
         order = {
           id: Number(row.id),
+          number: row.order_number || `DEM-${row.id}`,
           departmentId: Number(row.department_id),
           departmentName: row.department_name,
+          createdByUserId: row.created_by_user_id === null ? null : Number(row.created_by_user_id),
           createdByEmail: row.created_by_email,
           createdByName: row.created_by_name || null,
           status: row.status,
@@ -754,6 +1128,12 @@ class AzureDatabase {
           createdAt: row.created_at,
           decidedAt: row.decided_at,
           decidedByEmail: row.decided_by_email,
+          isUrgent: Boolean(row.is_urgent),
+          isExternal: Boolean(row.is_external),
+          clientName: row.client_name || null,
+          clientReference: row.client_reference || null,
+          purchasedAt: row.purchased_at,
+          purchasedByEmail: row.purchased_by_email || null,
           items: [],
           totalCents: 0
         };
@@ -766,12 +1146,166 @@ class AzureDatabase {
           productId: Number(row.product_id),
           productName: row.product_name,
           priceCents,
-          quantity
+          quantity,
+          unit: row.unit || "unité",
+          sku: row.sku || "",
+          supplierName: row.supplier_name || null,
+          purchaseOrderNumber: row.purchase_order_number || null
         });
         order.totalCents += priceCents * quantity;
       }
     }
     return [...orders.values()];
+  }
+
+  // Adds every approved, not yet bought request line to the open purchase order of its
+  // supplier (one per supplier), creating it (numbered PG-AAAA00001) if needed.
+  async assignApprovedItemsToPurchaseOrders() {
+    const transaction = new sql.Transaction(this.pool);
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    try {
+      const pending = (await this.query(`
+        SELECT i.Id AS id, i.SupplierId AS supplier_id, i.SupplierName AS supplier_name
+        FROM dbo.PromographeOrderItems i WITH (UPDLOCK)
+        JOIN dbo.PromographeOrders o ON o.Id = i.OrderId
+        WHERE o.Status = N'approved' AND o.PurchasedAt IS NULL AND i.PurchaseOrderId IS NULL
+      `, [], transaction)).recordset;
+      for (const group of groupBySupplier(pending)) {
+        const open = (await this.query(`
+          SELECT TOP 1 Id AS id FROM dbo.PromographePurchaseOrders WITH (UPDLOCK, HOLDLOCK)
+          WHERE Status = N'open' AND ${group.supplierId === null
+            ? "SupplierId IS NULL AND ISNULL(SupplierName, N'') = ?"
+            : "SupplierId = ?"}
+          ORDER BY Id
+        `, [group.supplierId === null ? group.supplierName || "" : group.supplierId], transaction)).recordset[0];
+        let purchaseOrderId = open && Number(open.id);
+        if (!purchaseOrderId) {
+          const base = purchaseOrderNumberBase(new Date());
+          const sameYear = (await this.query(`
+            SELECT Number AS number FROM dbo.PromographePurchaseOrders WITH (UPDLOCK, HOLDLOCK)
+            WHERE Number LIKE ?
+          `, [`${base}%`], transaction)).recordset.map((row) => row.number);
+          purchaseOrderId = Number((await this.query(`
+            INSERT INTO dbo.PromographePurchaseOrders (Number, SupplierId, SupplierName)
+            OUTPUT INSERTED.Id AS id VALUES (?, ?, ?)
+          `, [nextPurchaseOrderNumber(base, sameYear), group.supplierId, group.supplierName], transaction)).recordset[0].id);
+        }
+        for (const itemId of group.itemIds) {
+          await this.query("UPDATE dbo.PromographeOrderItems SET PurchaseOrderId = ? WHERE Id = ?", [purchaseOrderId, itemId], transaction);
+        }
+      }
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+
+  async listPurchaseOrders() {
+    const result = await this.query(`
+      SELECT po.Id AS id, po.Number AS number, COALESCE(s.Name, po.SupplierName) AS supplier_name,
+        po.Status AS status, po.CreatedAt AS created_at, po.PurchasedAt AS purchased_at,
+        COALESCE(buyer.Email, po.PurchasedByEmailSnapshot) AS purchased_by_email,
+        po.SentAt AS sent_at, COALESCE(sender.Email, po.SentByEmailSnapshot) AS sent_by_email,
+        po.SentMethod AS sent_method, po.SentNote AS sent_note,
+        s.ContactName AS supplier_contact, s.Email AS supplier_email, s.Phone AS supplier_phone,
+        s.Website AS supplier_website, s.OrderMethod AS supplier_order_method,
+        s.PhoneExtension AS supplier_phone_extension, s.Note AS supplier_note,
+        s.ReducedShippingThresholdCents AS supplier_reduced_threshold_cents,
+        s.FreeShippingThresholdCents AS supplier_free_threshold_cents,
+        s.AccountNumber AS supplier_account_number, s.Currency AS supplier_currency,
+        s.PaymentTerms AS supplier_payment_terms, s.IsAuthorized AS supplier_is_authorized, s.Category AS supplier_category,
+        i.ProductId AS product_id, i.ProductName AS product_name, i.UnitPriceCents AS price_cents,
+        i.Unit AS unit, i.Sku AS sku, p.Description AS product_description,
+        i.Quantity AS quantity, o.Id AS order_id, o.OrderNumber AS order_number, o.IsUrgent AS is_urgent, d.Name AS department_name,
+        o.ClientName AS client_name,
+        COALESCE(u.FullName, o.CreatedByNameSnapshot, u.Email, o.CreatedByEmailSnapshot) AS requester,
+        COALESCE(reviewer.FullName, reviewer.Email, o.DecidedByEmailSnapshot) AS approved_by,
+        reviewer.Role AS approved_by_role
+      FROM dbo.PromographePurchaseOrders po
+      LEFT JOIN dbo.PromographeSuppliers s ON s.Id = po.SupplierId
+      LEFT JOIN dbo.PromographeUsers buyer ON buyer.Id = po.PurchasedByUserId
+      LEFT JOIN dbo.PromographeUsers sender ON sender.Id = po.SentByUserId
+      JOIN dbo.PromographeOrderItems i ON i.PurchaseOrderId = po.Id
+      LEFT JOIN dbo.PromographeProducts p ON p.Id = i.ProductId
+      JOIN dbo.PromographeOrders o ON o.Id = i.OrderId
+      JOIN dbo.PromographeDepartments d ON d.Id = o.DepartmentId
+      LEFT JOIN dbo.PromographeUsers u ON u.Id = o.CreatedByUserId
+      LEFT JOIN dbo.PromographeUsers reviewer ON reviewer.Id = o.DecidedByUserId
+      ORDER BY po.Id DESC, i.ProductName, o.Id
+    `);
+    return groupPurchaseOrders(result.recordset);
+  }
+
+  // The director records how the purchase order was transmitted to the supplier. A sent
+  // order takes no more lines: the next approvals open a new one.
+  async markPurchaseOrderSent(id, userId, method, note) {
+    const result = await this.query(`
+      UPDATE dbo.PromographePurchaseOrders
+      SET Status = N'sent', SentAt = SYSUTCDATETIME(), SentByUserId = ?, SentMethod = ?, SentNote = ?
+      WHERE Id = ? AND Status = N'open'
+    `, [userId, method, note || null, id]);
+    return result.rowsAffected[0] > 0;
+  }
+
+  // Buying a purchase order closes it; a request counts as bought once all its lines are.
+  async markPurchaseOrderPurchased(id, userId) {
+    const transaction = new sql.Transaction(this.pool);
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    try {
+      const updated = await this.query(`
+        UPDATE dbo.PromographePurchaseOrders
+        SET Status = N'purchased', PurchasedAt = SYSUTCDATETIME(), PurchasedByUserId = ?
+        WHERE Id = ? AND Status IN (N'open', N'sent')
+      `, [userId, id], transaction);
+      if (!updated.rowsAffected[0]) {
+        await transaction.rollback();
+        return false;
+      }
+      await this.query(`
+        UPDATE o SET o.PurchasedAt = SYSUTCDATETIME(), o.PurchasedByUserId = ?
+        FROM dbo.PromographeOrders o
+        WHERE o.PurchasedAt IS NULL
+          AND EXISTS (SELECT 1 FROM dbo.PromographeOrderItems i WHERE i.OrderId = o.Id AND i.PurchaseOrderId = ?)
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.PromographeOrderItems i
+            LEFT JOIN dbo.PromographePurchaseOrders po ON po.Id = i.PurchaseOrderId
+            WHERE i.OrderId = o.Id AND (po.Id IS NULL OR po.Status <> N'purchased')
+          )
+      `, [userId, id], transaction);
+      await transaction.commit();
+      return true;
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+
+  // The accountant records that an approved request has been bought.
+  async markOrderPurchased(id, userId) {
+    const result = await this.query(`
+      UPDATE dbo.PromographeOrders SET PurchasedAt = SYSUTCDATETIME(), PurchasedByUserId = ?
+      WHERE Id = ? AND Status = N'approved' AND PurchasedAt IS NULL
+    `, [userId, id]);
+    return result.rowsAffected[0] > 0;
+  }
+
+  async getOrderOwner(id) {
+    const result = await this.query(`
+      SELECT o.DepartmentId AS department_id, o.CreatedByUserId AS created_by_user_id, o.Status AS status,
+        o.OrderNumber AS order_number,
+        (SELECT SUM(CAST(i.UnitPriceCents AS bigint) * i.Quantity)
+          FROM dbo.PromographeOrderItems i WHERE i.OrderId = o.Id) AS total_cents
+      FROM dbo.PromographeOrders o WHERE o.Id = ?
+    `, [id]);
+    const order = result.recordset[0];
+    return order && {
+      department_id: Number(order.department_id),
+      created_by_user_id: Number(order.created_by_user_id),
+      status: order.status,
+      order_number: order.order_number || `DEM-${id}`,
+      total_cents: Number(order.total_cents || 0)
+    };
   }
 
   async decideOrder(id, status, decisionNote, decidedByUserId) {
@@ -839,4 +1373,7 @@ class AzureDatabase {
   }
 }
 
-module.exports = { AzureDatabase, createSqlConfig };
+module.exports = {
+  AzureDatabase, createSqlConfig, groupBySupplier, groupPurchaseOrders, nextOrderNumber, orderNumberBase,
+  nextPurchaseOrderNumber, purchaseOrderNumberBase
+};

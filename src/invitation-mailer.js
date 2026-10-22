@@ -15,11 +15,12 @@ function createAzureTransport(env) {
     ? new EmailClient(env.ACS_EMAIL_CONNECTION_STRING.trim())
     : new EmailClient(env.ACS_EMAIL_ENDPOINT.trim(), new DefaultAzureCredential());
   return {
-    async sendMail({ to, subject, text, html }) {
+    async sendMail({ to, subject, text, html, replyTo }) {
       const poller = await client.beginSend({
         senderAddress: env.ACS_EMAIL_FROM.trim(),
         recipients: { to: [{ address: to }] },
-        content: { subject, plainText: text, html }
+        content: { subject, plainText: text, html },
+        ...(replyTo ? { replyTo: [{ address: replyTo }] } : {})
       });
       const result = await poller.pollUntilDone();
       if (result.status !== "Succeeded") {
@@ -69,10 +70,10 @@ function createInvitationMailer(env) {
       const invitationUrl = new URL("/accept-invitation.html", parsedBaseUrl);
       invitationUrl.hash = new URLSearchParams({ token }).toString();
       const roleText = role === "admin"
-        ? "administrateur(trice)"
+        ? "directeur(trice)"
         : `responsable du département ${departmentName}`;
       const roleHtml = role === "admin"
-        ? "<strong>administrateur(trice)</strong>"
+        ? "<strong>directeur(trice)</strong>"
         : `responsable du département <strong>${escapeHtml(departmentName)}</strong>`;
       await transport.sendMail({
         from: env.SMTP_FROM,
@@ -89,6 +90,13 @@ function createInvitationMailer(env) {
         ].join("\n"),
         html: `<p>Bonjour,</p><p>Vous avez été invité(e) à rejoindre Promographe comme ${roleHtml}.</p><p><a href="${escapeHtml(invitationUrl.toString())}">Définir mon mot de passe</a></p><p>Ce lien expirera dans 24 heures. Si vous n'attendiez pas cette invitation, vous pouvez ignorer ce message.</p>`
       });
+    },
+    // A purchase order to a supplier; replies go to the director who sent it.
+    async sendPurchaseOrder({ to, replyTo, subject, text, html }) {
+      if (!transport) {
+        throw new Error("Email delivery is not configured.");
+      }
+      await transport.sendMail({ from: env.SMTP_FROM, to, replyTo, subject, text, html });
     },
     async sendPasswordReset({ email, token }) {
       if (!transport) {

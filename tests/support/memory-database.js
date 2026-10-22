@@ -1,3 +1,19 @@
+const {
+  groupBySupplier, groupPurchaseOrders, nextOrderNumber, orderNumberBase, nextPurchaseOrderNumber, purchaseOrderNumberBase
+} = require("../../src/database");
+
+const supplierDetails = (details) => ({
+  phone_extension: details.phoneExtension || "",
+  note: details.note || "",
+  reduced_threshold_cents: details.reducedThresholdCents ?? null,
+  free_threshold_cents: details.freeThresholdCents ?? null,
+  account_number: details.accountNumber || "",
+  currency: details.currency || "CAD",
+  payment_terms: details.paymentTerms || "",
+  is_authorized: details.isAuthorized !== false,
+  category: details.category || ""
+});
+
 class MemoryDatabase {
   constructor() {
     this.nextDepartmentId = 1;
@@ -13,6 +29,10 @@ class MemoryDatabase {
     this.invitations = new Map();
     this.products = new Map();
     this.orders = new Map();
+    this.userFunctions = new Map();
+    this.nextItemId = 1;
+    this.nextPurchaseOrderId = 1;
+    this.purchaseOrders = new Map();
   }
 
   async getUserByEmail(email) {
@@ -84,15 +104,68 @@ class MemoryDatabase {
   async listUsers() {
     return [...this.users.values()]
       .filter((user) => !user.deleted)
-      .map(({ password_hash, deleted, ...user }) => user);
+      .map(({ password_hash, deleted, ...user }) => ({
+        ...user,
+        requested_manager_department_id: user.requested_manager_department_id ?? null,
+        functions: [...(this.userFunctions.get(user.id) || [])]
+      }));
   }
 
-  async updateManager(id, fullName, departmentId) {
+  async updateUserDetails(id, fullName, departmentId) {
     const user = this.users.get(Number(id));
-    if (!user || user.role !== "department_manager" || user.deleted) {
+    if (!user || !["employee", "admin", "accountant", "purchaser"].includes(user.role) || user.deleted) {
       return false;
     }
-    Object.assign(user, { full_name: fullName, department_id: Number(departmentId) });
+    if (user.role === "employee" && departmentId === null) {
+      // Same rule as the SQL constraint CK_PromographeUsers_EmployeeDepartment.
+      throw Object.assign(new Error("employee requires a department"), { number: 547 });
+    }
+    Object.assign(user, { full_name: fullName, department_id: departmentId === null ? null : Number(departmentId) });
+    return true;
+  }
+
+  async updateStaffRole(id, role) {
+    const user = this.users.get(Number(id));
+    if (!user || !["employee", "accountant", "purchaser"].includes(user.role) || user.deleted) {
+      return false;
+    }
+    if (role === "employee" && !user.department_id) {
+      throw Object.assign(new Error("employee requires a department"), { number: 547 });
+    }
+    user.role = role;
+    return true;
+  }
+
+  async getUserFunctions(userId) {
+    return [...(this.userFunctions.get(Number(userId)) || [])].sort();
+  }
+
+  async setUserFunctions(userId, codes) {
+    this.userFunctions.set(Number(userId), new Set(codes));
+  }
+
+  async setManagerRequest(userId, departmentId) {
+    this.users.get(Number(userId)).requested_manager_department_id = departmentId === null ? null : Number(departmentId);
+  }
+
+  async getManagerRequest(userId) {
+    const user = this.users.get(Number(userId));
+    const department = user && !user.deleted && (await this.getDepartment(user.requested_manager_department_id));
+    return department ? { id: department.id, name: department.name } : null;
+  }
+
+  async getManagedDepartments(userId) {
+    return [...this.departments.values()]
+      .filter((department) => !department.deleted && department.manager_user_id === Number(userId))
+      .map(({ id, name }) => ({ id, name }));
+  }
+
+  async setDepartmentManager(departmentId, userId) {
+    const department = await this.getDepartment(departmentId);
+    if (!department) {
+      return false;
+    }
+    department.manager_user_id = userId === null ? null : Number(userId);
     return true;
   }
 
@@ -120,8 +193,8 @@ class MemoryDatabase {
     }
   }
 
-  async deleteManager(id) {
-    return this.deleteUserWithRole(id, "department_manager");
+  async deleteEmployee(id) {
+    return this.deleteUserWithRole(id, "employee");
   }
 
   async deleteAdmin(id) {
@@ -133,22 +206,63 @@ class MemoryDatabase {
     if (!user || user.role !== role || user.deleted) {
       return false;
     }
-    Object.assign(user, {
-      deleted: true,
-      is_active: false,
-      session_version: (user.session_version || 0) + 1
-    });
+    // Removed for good; the purchase history keeps a copy of the name and email.
+    for (const order of this.orders.values()) {
+      if (order.created_by_user_id === user.id) {
+        Object.assign(order, {
+          created_by_user_id: null,
+          created_by_email_snapshot: user.email,
+          created_by_name_snapshot: user.full_name || null
+        });
+      }
+      if (order.decided_by_user_id === user.id) {
+        Object.assign(order, { decided_by_user_id: null, decided_by_email_snapshot: user.email });
+      }
+      if (order.purchased_by_user_id === user.id) {
+        Object.assign(order, { purchased_by_user_id: null, purchased_by_email_snapshot: user.email });
+      }
+    }
+    for (const purchaseOrder of this.purchaseOrders.values()) {
+      if (purchaseOrder.purchased_by_user_id === user.id) {
+        Object.assign(purchaseOrder, { purchased_by_user_id: null, purchased_by_email_snapshot: user.email });
+      }
+      if (purchaseOrder.sent_by_user_id === user.id) {
+        Object.assign(purchaseOrder, { sent_by_user_id: null, sent_by_email_snapshot: user.email });
+      }
+    }
+    for (const product of this.products.values()) {
+      if (product.created_by_user_id === user.id) {
+        product.created_by_user_id = null;
+      }
+    }
+    this.users.delete(user.id);
     for (const [invitationId, invitation] of this.invitations) {
       if (invitation.user_id === user.id) {
         this.invitations.delete(invitationId);
       }
     }
     this.passwordResets = this.passwordResets.filter((reset) => reset.user_id !== user.id);
+    this.userFunctions.delete(user.id);
+    for (const department of this.departments.values()) {
+      if (department.manager_user_id === user.id) {
+        department.manager_user_id = null;
+      }
+    }
     return true;
   }
 
   async listDepartments() {
-    return [...this.departments.values()].filter((department) => !department.deleted);
+    return [...this.departments.values()]
+      .filter((department) => !department.deleted)
+      .map((department) => {
+        const manager = this.users.get(department.manager_user_id);
+        return {
+          ...department,
+          manager_user_id: department.manager_user_id ?? null,
+          manager_name: manager?.full_name ?? null,
+          manager_email: manager?.email ?? null
+        };
+      });
   }
 
   async getDepartment(id) {
@@ -212,14 +326,22 @@ class MemoryDatabase {
   }
 
   async getDashboard(year) {
-    const orders = [...this.orders.values()]
+    const yearOrders = [...this.orders.values()]
       .filter((order) => new Date(order.created_at).getFullYear() === year);
+    const orders = yearOrders.filter((order) => !order.is_external);
+    const clientOrders = yearOrders.filter((order) => order.is_external);
     const total = (order) => order.items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
     const orderCounts = {};
-    orders.forEach((order) => {
+    yearOrders.forEach((order) => {
       orderCounts[order.status] = (orderCounts[order.status] || 0) + 1;
     });
+    const clientSum = (status) => clientOrders.filter((order) => order.status === status).reduce((sum, order) => sum + total(order), 0);
     return {
+      external: {
+        approvedCents: clientSum("approved"),
+        pendingCents: clientSum("pending"),
+        orders: clientOrders.filter((order) => order.status !== "rejected").length
+      },
       departments: (await this.listDepartments()).map((department) => {
         const departmentOrders = orders.filter((order) => order.department_id === department.id);
         const sumFor = (status) => departmentOrders
@@ -252,16 +374,16 @@ class MemoryDatabase {
     return supplier && { id: supplier.id, name: supplier.name };
   }
 
-  async createSupplier(name, contactName, email, phone) {
+  async createSupplier(name, contactName, email, phone, website = "", orderMethod = "", details = {}) {
     if ([...this.suppliers.values()].some((supplier) => supplier.name === name)) {
       throw Object.assign(new Error("duplicate supplier"), { number: 2627 });
     }
     const id = this.nextSupplierId++;
-    this.suppliers.set(id, { id, name, contact_name: contactName, email, phone });
+    this.suppliers.set(id, { id, name, contact_name: contactName, email, phone, website, order_method: orderMethod, ...supplierDetails(details) });
     return id;
   }
 
-  async updateSupplier(id, name, contactName, email, phone) {
+  async updateSupplier(id, name, contactName, email, phone, website = "", orderMethod = "", details = {}) {
     const supplier = this.suppliers.get(Number(id));
     if (!supplier) {
       return false;
@@ -269,7 +391,7 @@ class MemoryDatabase {
     if ([...this.suppliers.values()].some((other) => other.name === name && other.id !== supplier.id)) {
       throw Object.assign(new Error("duplicate supplier"), { number: 2627 });
     }
-    Object.assign(supplier, { name, contact_name: contactName, email, phone });
+    Object.assign(supplier, { name, contact_name: contactName, email, phone, website, order_method: orderMethod, ...supplierDetails(details) });
     return true;
   }
 
@@ -296,6 +418,12 @@ class MemoryDatabase {
     });
   }
 
+  async createMicrosoftEmployee(email, passwordHash, departmentId, fullName) {
+    const id = await this.createPendingManager(email, passwordHash, departmentId, fullName);
+    this.users.get(id).is_active = true;
+    return id;
+  }
+
   async createPendingManager(email, passwordHash, departmentId, fullName = "") {
     if (await this.getUserByEmail(email)) {
       throw Object.assign(new Error("duplicate user"), { number: 2627 });
@@ -305,7 +433,7 @@ class MemoryDatabase {
       id,
       email,
       password_hash: passwordHash,
-      role: "department_manager",
+      role: "employee",
       department_id: departmentId,
       full_name: fullName,
       is_active: false
@@ -393,11 +521,11 @@ class MemoryDatabase {
   async listProducts(user) {
     return [...this.products.values()]
       .filter((product) => !product.deleted)
-      .filter((product) => user.role === "admin" || product.department_id === Number(user.department_id))
       .map(({ deleted, ...product }) => ({
         ...product,
         department_name: this.departments.get(product.department_id)?.name ?? null,
-        supplier_name: this.suppliers.get(product.supplier_id)?.name ?? null
+        supplier_name: this.suppliers.get(product.supplier_id)?.name ?? null,
+        supplier_authorized: this.suppliers.get(product.supplier_id)?.is_authorized ?? true
       }));
   }
 
@@ -410,22 +538,24 @@ class MemoryDatabase {
     };
   }
 
-  async createProduct(name, description, priceCents, departmentId, supplierId, createdByUserId, isActive = true) {
+  async createProduct(name, description, priceCents, departmentId, supplierId, createdByUserId, isActive = true, unit = "unité", sku = "") {
     const id = this.nextProductId++;
     this.products.set(id, {
       id,
       name,
       description,
+      sku,
       price_cents: priceCents,
       department_id: Number(departmentId),
       supplier_id: supplierId,
       is_active: isActive,
+      unit,
       created_by_user_id: createdByUserId
     });
     return id;
   }
 
-  async updateProduct(id, name, description, priceCents, departmentId, supplierId, isActive) {
+  async updateProduct(id, name, description, priceCents, departmentId, supplierId, isActive, unit = "unité", sku = "") {
     const product = this.products.get(Number(id));
     if (!product || product.deleted) {
       return false;
@@ -433,10 +563,12 @@ class MemoryDatabase {
     Object.assign(product, {
       name,
       description,
+      sku,
       price_cents: priceCents,
       department_id: Number(departmentId),
       supplier_id: supplierId,
-      is_active: isActive
+      is_active: isActive,
+      unit
     });
     return true;
   }
@@ -456,26 +588,50 @@ class MemoryDatabase {
         product.supplier_id = null;
       }
     }
+    for (const purchaseOrder of this.purchaseOrders.values()) {
+      if (purchaseOrder.supplier_id === Number(id)) {
+        purchaseOrder.supplier_id = null;
+      }
+    }
+    for (const order of this.orders.values()) {
+      for (const item of order.items) {
+        if (item.supplierId === Number(id)) {
+          item.supplierId = null;
+        }
+      }
+    }
     return this.suppliers.delete(Number(id));
   }
 
-  async createOrder(departmentId, userId, notes, items) {
+  async peekNextOrderNumber() {
+    return nextOrderNumber(orderNumberBase(new Date()), [...this.orders.values()].map((order) => order.number));
+  }
+
+  async createOrder(departmentId, userId, notes, items, isUrgent = false, client = null) {
     const orderItems = [];
     for (const item of items) {
       const product = this.products.get(Number(item.productId));
-      if (!product || !product.is_active || product.department_id !== Number(departmentId)) {
+      if (!product || !product.is_active) {
         return null;
       }
       orderItems.push({
+        id: this.nextItemId++,
         productId: product.id,
         productName: product.name,
         priceCents: product.price_cents,
-        quantity: item.quantity
+        quantity: item.quantity,
+        unit: item.unit || product.unit || "unité",
+        sku: product.sku || "",
+        supplierId: product.supplier_id ?? null,
+        supplierName: this.suppliers.get(product.supplier_id)?.name ?? null,
+        purchaseOrderId: null
       });
     }
     const id = this.nextOrderId++;
+    const base = orderNumberBase(new Date());
     this.orders.set(id, {
       id,
+      number: nextOrderNumber(base, [...this.orders.values()].map((order) => order.number)),
       department_id: Number(departmentId),
       created_by_user_id: Number(userId),
       status: "pending",
@@ -484,14 +640,22 @@ class MemoryDatabase {
       decided_by_user_id: null,
       created_at: new Date().toISOString(),
       decided_at: null,
+      is_urgent: Boolean(isUrgent),
+      is_external: Boolean(client),
+      client_name: client?.name || null,
+      client_reference: client?.reference || null,
+      purchased_at: null,
+      purchased_by_user_id: null,
       items: orderItems
     });
     return id;
   }
 
-  async listOrders(user) {
+  async listOrders(user, managedDepartmentIds = []) {
+    const departmentIds = managedDepartmentIds.map(Number);
     return [...this.orders.values()]
-      .filter((order) => user.role === "admin" || order.department_id === Number(user.department_id))
+      .filter((order) => ["admin", "accountant"].includes(user.role) ||
+        order.created_by_user_id === Number(user.id) || departmentIds.includes(order.department_id))
       .sort((a, b) => b.id - a.id)
       .map((order) => {
         const department = this.departments.get(order.department_id);
@@ -499,22 +663,180 @@ class MemoryDatabase {
         const decider = this.users.get(order.decided_by_user_id);
         return {
           id: order.id,
+          number: order.number,
           departmentId: order.department_id,
           departmentName: department.name,
-          createdByEmail: creator.email,
-          createdByName: creator.full_name || null,
+          createdByUserId: order.created_by_user_id,
+          createdByEmail: creator ? creator.email : order.created_by_email_snapshot,
+          createdByName: (creator ? creator.full_name : order.created_by_name_snapshot) || null,
           status: order.status,
           notes: order.notes,
           decisionNote: order.decision_note,
           createdAt: order.created_at,
           decidedAt: order.decided_at,
-          decidedByEmail: decider && decider.email,
-          items: order.items.map((item) => ({ ...item })),
+          decidedByEmail: decider ? decider.email : order.decided_by_email_snapshot,
+          isUrgent: Boolean(order.is_urgent),
+          isExternal: Boolean(order.is_external),
+          clientName: order.client_name || null,
+          clientReference: order.client_reference || null,
+          purchasedAt: order.purchased_at,
+          purchasedByEmail: this.users.get(order.purchased_by_user_id)?.email ?? order.purchased_by_email_snapshot ?? null,
+          items: order.items.map((item) => ({
+            productId: item.productId,
+            productName: item.productName,
+            priceCents: item.priceCents,
+            quantity: item.quantity,
+            unit: item.unit,
+            sku: item.sku || "",
+            supplierName: item.supplierName,
+            purchaseOrderNumber: this.purchaseOrders.get(item.purchaseOrderId)?.number ?? null
+          })),
           totalCents: order.items.reduce((total, item) => (
             total + item.priceCents * item.quantity
           ), 0)
         };
       });
+  }
+
+  async assignApprovedItemsToPurchaseOrders() {
+    const pending = [];
+    for (const order of this.orders.values()) {
+      if (order.status === "approved" && !order.purchased_at) {
+        for (const item of order.items) {
+          if (!item.purchaseOrderId) {
+            pending.push({ id: item.id, supplier_id: item.supplierId, supplier_name: item.supplierName, item });
+          }
+        }
+      }
+    }
+    const itemsById = new Map(pending.map((entry) => [entry.id, entry.item]));
+    for (const group of groupBySupplier(pending)) {
+      let purchaseOrder = [...this.purchaseOrders.values()].find((candidate) => candidate.status === "open" && (
+        group.supplierId === null
+          ? candidate.supplier_id === null && (candidate.supplier_name || "") === (group.supplierName || "")
+          : candidate.supplier_id === group.supplierId
+      ));
+      if (!purchaseOrder) {
+        purchaseOrder = {
+          id: this.nextPurchaseOrderId++,
+          number: nextPurchaseOrderNumber(purchaseOrderNumberBase(new Date()), [...this.purchaseOrders.values()].map((candidate) => candidate.number)),
+          supplier_id: group.supplierId,
+          supplier_name: group.supplierName,
+          status: "open",
+          created_at: new Date().toISOString(),
+          purchased_at: null,
+          purchased_by_user_id: null
+        };
+        this.purchaseOrders.set(purchaseOrder.id, purchaseOrder);
+      }
+      for (const itemId of group.itemIds) {
+        itemsById.get(itemId).purchaseOrderId = purchaseOrder.id;
+      }
+    }
+  }
+
+  async listPurchaseOrders() {
+    const rows = [];
+    for (const purchaseOrder of [...this.purchaseOrders.values()].sort((a, b) => b.id - a.id)) {
+      const lines = [];
+      for (const order of [...this.orders.values()].sort((a, b) => a.id - b.id)) {
+        const creator = this.users.get(order.created_by_user_id);
+        const reviewer = this.users.get(order.decided_by_user_id);
+        for (const item of order.items.filter((candidate) => candidate.purchaseOrderId === purchaseOrder.id)) {
+          lines.push({
+            id: purchaseOrder.id,
+            number: purchaseOrder.number,
+            supplier_name: this.suppliers.get(purchaseOrder.supplier_id)?.name ?? purchaseOrder.supplier_name,
+            status: purchaseOrder.status,
+            created_at: purchaseOrder.created_at,
+            purchased_at: purchaseOrder.purchased_at,
+            purchased_by_email: this.users.get(purchaseOrder.purchased_by_user_id)?.email ?? purchaseOrder.purchased_by_email_snapshot ?? null,
+            sent_at: purchaseOrder.sent_at ?? null,
+            sent_by_email: this.users.get(purchaseOrder.sent_by_user_id)?.email ?? purchaseOrder.sent_by_email_snapshot ?? null,
+            sent_method: purchaseOrder.sent_method ?? null,
+            sent_note: purchaseOrder.sent_note ?? null,
+            supplier_contact: this.suppliers.get(purchaseOrder.supplier_id)?.contact_name ?? "",
+            supplier_email: this.suppliers.get(purchaseOrder.supplier_id)?.email ?? "",
+            supplier_phone: this.suppliers.get(purchaseOrder.supplier_id)?.phone ?? "",
+            supplier_website: this.suppliers.get(purchaseOrder.supplier_id)?.website ?? "",
+            supplier_order_method: this.suppliers.get(purchaseOrder.supplier_id)?.order_method ?? "",
+            supplier_phone_extension: this.suppliers.get(purchaseOrder.supplier_id)?.phone_extension ?? "",
+            supplier_note: this.suppliers.get(purchaseOrder.supplier_id)?.note ?? "",
+            supplier_reduced_threshold_cents: this.suppliers.get(purchaseOrder.supplier_id)?.reduced_threshold_cents ?? null,
+            supplier_free_threshold_cents: this.suppliers.get(purchaseOrder.supplier_id)?.free_threshold_cents ?? null,
+            supplier_account_number: this.suppliers.get(purchaseOrder.supplier_id)?.account_number ?? "",
+            supplier_currency: this.suppliers.get(purchaseOrder.supplier_id)?.currency ?? "CAD",
+            supplier_payment_terms: this.suppliers.get(purchaseOrder.supplier_id)?.payment_terms ?? "",
+            supplier_is_authorized: this.suppliers.get(purchaseOrder.supplier_id)?.is_authorized ?? true,
+            supplier_category: this.suppliers.get(purchaseOrder.supplier_id)?.category ?? "",
+            product_description: this.products.get(item.productId)?.description ?? "",
+            product_id: item.productId,
+            product_name: item.productName,
+            price_cents: item.priceCents,
+            quantity: item.quantity,
+            unit: item.unit,
+            sku: item.sku || "",
+            order_id: order.id,
+            order_number: order.number,
+            client_name: order.client_name || null,
+            is_urgent: order.is_urgent,
+            department_name: this.departments.get(order.department_id).name,
+            requester: (creator ? creator.full_name || creator.email : order.created_by_name_snapshot || order.created_by_email_snapshot),
+            approved_by: reviewer ? reviewer.full_name || reviewer.email : order.decided_by_email_snapshot ?? null,
+            approved_by_role: reviewer ? reviewer.role : null
+          });
+        }
+      }
+      rows.push(...lines.sort((a, b) => a.product_name.localeCompare(b.product_name) || a.order_id - b.order_id));
+    }
+    return groupPurchaseOrders(rows);
+  }
+
+  async markPurchaseOrderSent(id, userId, method, note) {
+    const purchaseOrder = this.purchaseOrders.get(Number(id));
+    if (!purchaseOrder || purchaseOrder.status !== "open") {
+      return false;
+    }
+    Object.assign(purchaseOrder, {
+      status: "sent", sent_at: new Date().toISOString(), sent_by_user_id: Number(userId), sent_method: method, sent_note: note || null
+    });
+    return true;
+  }
+
+  async markPurchaseOrderPurchased(id, userId) {
+    const purchaseOrder = this.purchaseOrders.get(Number(id));
+    if (!purchaseOrder || !["open", "sent"].includes(purchaseOrder.status)) {
+      return false;
+    }
+    const now = new Date().toISOString();
+    Object.assign(purchaseOrder, { status: "purchased", purchased_at: now, purchased_by_user_id: Number(userId) });
+    for (const order of this.orders.values()) {
+      if (!order.purchased_at && order.items.some((item) => item.purchaseOrderId === purchaseOrder.id) &&
+        order.items.every((item) => this.purchaseOrders.get(item.purchaseOrderId)?.status === "purchased")) {
+        Object.assign(order, { purchased_at: now, purchased_by_user_id: Number(userId) });
+      }
+    }
+    return true;
+  }
+
+  async markOrderPurchased(id, userId) {
+    const order = this.orders.get(Number(id));
+    if (!order || order.status !== "approved" || order.purchased_at) {
+      return false;
+    }
+    Object.assign(order, { purchased_at: new Date().toISOString(), purchased_by_user_id: Number(userId) });
+    return true;
+  }
+
+  async getOrderOwner(id) {
+    const order = this.orders.get(Number(id));
+    return order && {
+      department_id: order.department_id,
+      created_by_user_id: order.created_by_user_id,
+      status: order.status,
+      order_number: order.number,
+      total_cents: order.items.reduce((sum, item) => sum + item.priceCents * item.quantity, 0)
+    };
   }
 
   async decideOrder(id, status, decisionNote, decidedByUserId) {

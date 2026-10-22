@@ -63,7 +63,8 @@ Suppression **physique** : les produits liés passent à `SupplierId = NULL`.
 |---|---|---|
 | Id | int, identité | Clé primaire |
 | Name | nvarchar(150) | Obligatoire |
-| Description | nvarchar(500) | Contient le code fournisseur (« Code : … ») |
+| Description | nvarchar(500) | Texte libre |
+| Sku | nvarchar(50) | Code du produit chez le fournisseur, vide si inconnu |
 | UnitPriceCents | int | ≥ 0 |
 | DepartmentId | int, null | → Departments (index avec Name) |
 | SupplierId | int, null | → Suppliers |
@@ -94,6 +95,7 @@ Index : `(DepartmentId, CreatedAt DESC)`.
 | ProductId | int | → Products |
 | ProductName | nvarchar(150) | **Copie** du nom au moment de la demande |
 | UnitPriceCents | int | **Copie** du prix au moment de la demande, ≥ 0 |
+| Sku | nvarchar(50), null | **Copie** du SKU au moment de la demande |
 | Quantity | int | > 0 |
 
 ### PromographeInvitations et PromographePasswordResets — jetons

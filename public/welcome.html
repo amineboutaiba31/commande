@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>Bienvenue | Promographe</title>
+  <link rel="icon" href="/favicon.png" type="image/png">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 20px;
+      display: grid;
+      place-items: center;
+      background: #f2f5f9;
+      color: #26364a;
+      font-family: Arial, sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 460px;
+      padding: 36px;
+      border-radius: 16px;
+      background: white;
+      box-shadow: 0 12px 40px rgba(24, 53, 84, 0.10);
+    }
+
+    h1 {
+      margin-top: 0;
+      color: #174a7e;
+    }
+
+    label {
+      display: block;
+      margin: 18px 0 8px;
+      font-weight: 600;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #d8e0e9;
+      border-radius: 8px;
+      font-size: 15px;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 24px;
+      padding: 14px;
+      border: 0;
+      border-radius: 8px;
+      background: #174a7e;
+      color: white;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    #message {
+      min-height: 20px;
+      color: #b42318;
+    }
+      .choice {
+      display: flex;
+      gap: 18px;
+      margin: 0 0 14px;
+      padding: 10px 14px;
+      border: 1px solid #dce4ec;
+      border-radius: 8px;
+    }
+
+    .choice legend {
+      padding: 0 6px;
+      font-weight: 600;
+    }
+
+    .choice label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+    }
+
+    .choice input {
+      width: auto;
+    }
+
+    .note {
+      color: #69798b;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Bienvenue sur Promographe</h1>
+    <p id="welcomeInfo">Préparation de ton compte…</p>
+    <form id="welcomeForm" hidden>
+      <fieldset class="choice">
+        <legend>Es-tu responsable d’un département ?</legend>
+        <label><input type="radio" name="isManager" value="no" checked> Non</label>
+        <label><input type="radio" name="isManager" value="yes"> Oui</label>
+      </fieldset>
+      <label for="department" id="departmentLabel">À quel département appartiens-tu ?</label>
+      <select id="department" name="departmentId" required>
+        <option value="">Choisis ton département</option>
+      </select>
+      <button id="submitButton" type="submit">Accéder à Promographe</button>
+    </form>
+    <p class="note" id="managerNote" hidden>Ta demande de responsable sera envoyée à l’administrateur.
+      En attendant sa validation, tu peux déjà faire des demandes d’achat.</p>
+    <p id="message" role="status"></p>
+  </main>
+  <script src="/welcome.js"></script>
+</body>
+</html>

@@ -40,7 +40,7 @@
 1. Faire L1 et L2.
 2. Faire L3 et vérifier que `https://<nouvelle adresse>` affiche la page de connexion avec le cadenas.
 3. Se connecter comme Développeur → **Inviter un administrateur** (nom et courriel du responsable chez Promographe).
-4. L'administrateur accepte l'invitation, se connecte, vérifie l'Accueil, le Catalogue et l'Administration.
+4. L'administrateur accepte l'invitation, se connecte, vérifie le Tableau de bord, le Catalogue et l'Administration.
 5. L'administrateur saisit les prix (L5), puis invite ses responsables de département.
 6. Test réel : un responsable passe une demande → la cloche de l'admin sonne → approbation → la cloche du responsable sonne → la demande apparaît dans l'Historique et le CSV.
 7. Faire L6 et L7.

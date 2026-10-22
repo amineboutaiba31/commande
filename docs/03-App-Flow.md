@@ -16,8 +16,8 @@ flowchart TD
     L -->|courriel + mot de passe| R
     L -->|Mot de passe oublié ?| F[Demande de réinitialisation]
     R -- Développeur --> D[Page Administrateurs]
-    R -- Administrateur --> AD[Accueil · Commandes · Historique · Catalogue · Administration]
-    R -- Responsable --> RE[Commandes · Historique · Catalogue]
+    R -- Administrateur --> AD[Tableau de bord · Commandes · Historique · Catalogue · Administration]
+    R -- Responsable --> RE[Tableau de bord · Commandes · Rapport des bons · Historique · Catalogue · Employés]
 ```
 
 **En-tête commun** (après connexion) : nom de l'utilisateur · 🔔 cloche (sauf Développeur) · **Profil** · **Se déconnecter**.
@@ -89,7 +89,7 @@ flowchart TD
 ### 6.1 Navigation
 | Onglet | Contenu |
 |---|---|
-| **Accueil** | Indicateurs (budget total, coût des achats, en attente, budget restant) et tableau des budgets par département, par année |
+| **Tableau de bord** | Budgets et dépenses (indicateurs et tableau des budgets par département), puis Achats (bons, demandes, dépenses par mois, fournisseur et catégorie, hausses de prix), pour l'année choisie |
 | **Commandes** | Demandes **en attente** de tous les départements, avec Approuver / Refuser et une note |
 | **Historique** | Boutons **Visualiser** (tableau) et **Télécharger en CSV** |
 | **Catalogue** | Formulaire « Ajouter un produit » ; en dessous, liste des départements → tableau des produits (Modifier / Supprimer) |

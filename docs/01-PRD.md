@@ -29,7 +29,7 @@ Une application web interne où :
 |---|---|
 | Centraliser toutes les demandes d'achat | 100 % des demandes passent par l'application |
 | Accélérer l'approbation | L'admin est notifié d'une nouvelle demande en moins de 30 secondes |
-| Maîtriser les budgets | Budget, dépensé et en attente visibles par département sur l'Accueil |
+| Maîtriser les budgets | Budget, dépensé et en attente visibles par département sur le Tableau de bord |
 | Garder une trace | Chaque demande traitée est dans l'Historique et exportable en CSV |
 
 ## 4. Utilisateurs et rôles
@@ -38,7 +38,7 @@ Une application web interne où :
 |---|---|---|
 | **Développeur** | Le prestataire (Arovahub) | Uniquement inviter et retirer les **administrateurs** de l'entreprise. N'a **aucun** accès aux commandes, au catalogue ni aux employés. |
 | **Administrateur** | La direction de Promographe | Tout gérer : commandes (approuver / refuser), catalogue, départements, fournisseurs, responsables, budgets, historique. |
-| **Responsable de département** (employé) | Un employé par département ou plus | Commander dans le catalogue de son département, suivre ses demandes, consulter son historique. |
+| **Responsable de département** (employé) | Un employé par département ou plus | Voir et commander seulement les produits de son département, suivre ses demandes, consulter son historique. Dans le Catalogue : ajouter, modifier et supprimer les produits de son département, et les fournisseurs de ses produits (un fournisseur qui sert aussi d'autres départements ne se supprime que par la direction ; l'autorisation d'un fournisseur reste à la direction). Modifier les employés de son département (nom, département, accès : employé, comptable ou administration), sauf lui-même et les autres responsables. Voir le budget et les dépenses de son département, fixer son budget annuel et le renommer (créer, supprimer un département ou choisir son responsable reste à la direction). Consulter le tableau de bord des achats de son département (sa part de chaque bon de commande) et le rapport des bons par département, année et mois, avec export CSV. |
 
 ## 5. Fonctionnalités
 
@@ -70,10 +70,10 @@ Une application web interne où :
   - responsable : décisions non lues sur ses demandes, son à l'arrivée d'une décision.
 - Vérification toutes les 30 secondes. Aucune notification par courriel pour les commandes.
 
-### 5.5 Tableau de bord (Accueil, admin)
-- Indicateurs : budget total, coût total des achats, en attente d'approbation, budget restant.
-- Tableau par département : budget annuel modifiable, dépensé, en attente, restant, barre d'utilisation.
-- Choix de l'année.
+### 5.5 Tableau de bord (un seul onglet, une seule année)
+- **Budgets et dépenses** (directeur ; responsable pour son département) : budget total, coût des achats, en attente d'approbation, budget restant ; tableau par département avec budget annuel modifiable, dépensé, en attente, restant, barre d'utilisation.
+- **Achats** (directeur, comptable ; responsable pour sa part) : bons à acheter et achetés, demandes approuvées, en attente et refusées, commandes clients, dépenses par mois, produits les plus commandés, dépenses par fournisseur et par catégorie, hausses de prix.
+- Choix de l'année, commun aux deux parties.
 
 ### 5.6 Administration (admin)
 Page avec un **menu à gauche** :

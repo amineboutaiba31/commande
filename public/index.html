@@ -12,12 +12,20 @@
 <body>
   <header class="site-header">
     <div class="header-inner">
-      <div>
-        <a class="brand" href="/">Promographe</a>
-        <p>Gestion des commandes et des achats</p>
+      <div class="header-brand">
+        <button class="icon-button menu-toggle" id="menuToggle" type="button"
+          aria-label="Afficher ou masquer le menu" aria-expanded="true" aria-controls="sideMenu">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+        <div>
+          <a class="brand" href="/">Promographe</a>
+          <p>Gestion des commandes et des achats</p>
+        </div>
       </div>
       <div class="account">
-        <span id="accountInfo">Chargement du compte...</span>
         <div class="notifications">
           <button class="icon-button" id="notificationButton" type="button"
             aria-label="Notifications" aria-expanded="false" aria-controls="notificationPanel">
@@ -33,270 +41,642 @@
             <ul class="notification-list" id="notificationList"></ul>
           </div>
         </div>
-        <button class="button button-outline" id="profileButton" type="button">Profil</button>
-        <button class="button button-outline" id="logoutButton" type="button">Se déconnecter</button>
       </div>
     </div>
   </header>
 
   <main class="page">
-    <section class="welcome">
-      <div>
-        <p class="eyebrow">ESPACE DE GESTION</p>
-        <h1>Bonjour, bienvenue sur Promographe</h1>
-        <p>Consultez le catalogue, soumettez vos demandes d’achat et suivez leur approbation.</p>
-      </div>
-      <div class="health" id="status" role="status">Connexion au serveur…</div>
-    </section>
-
-    <nav class="tabs" aria-label="Sections de l’application">
-      <button class="tab" id="homeTab" type="button" data-panel="homePanel" hidden>Accueil</button>
-      <button class="tab active" id="ordersTab" type="button" data-panel="ordersPanel">Commandes</button>
-      <button class="tab" id="historyTab" type="button" data-panel="historyPanel">Historique</button>
-      <button class="tab" type="button" data-panel="productsPanel">Catalogue</button>
-      <button class="tab" id="adminTab" type="button" data-panel="adminPanel" hidden>Administration</button>
-    </nav>
-
-    <section class="panel" id="homePanel" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">TABLEAU DE BORD</p>
-          <h2>Budgets et dépenses</h2>
+    <div class="app-layout">
+      <div class="menu-backdrop" id="menuBackdrop" hidden></div>
+      <nav class="tabs" id="sideMenu" aria-label="Menu principal">
+        <div class="sidebar-user">
+          <span class="sidebar-avatar" id="accountAvatar" aria-hidden="true">?</span>
+          <span class="sidebar-user-text">
+            <strong id="accountInfo">Chargement du compte...</strong>
+            <span id="accountRole"></span>
+          </span>
         </div>
-        <label class="filter-label">
-          Année
-          <select id="dashboardYear"></select>
-        </label>
-      </div>
-      <p class="muted dashboard-note">Dépensé = demandes approuvées. En attente = demandes pas encore approuvées. Calculé selon la date de la demande.</p>
-      <div class="kpi-row" id="kpiRow" aria-live="polite"></div>
+        <button class="tab" id="homeTab" type="button" data-panel="homePanel" hidden><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg><span>Tableau de bord</span></button>
+        <button class="tab active" id="ordersTab" type="button" data-panel="ordersPanel"><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 12h6M9 16h4"/></svg><span>Commandes</span></button>
+        <button class="tab" id="purchaseTab" type="button" data-panel="purchasePanel" hidden><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l3 3v15H6z"/><path d="M9 10h6M9 14h6M9 18h4"/></svg><span>Bons de commande</span></button>
+        <button class="tab" id="historyTab" type="button" data-panel="historyPanel"><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Historique</span></button>
+        <button class="tab" type="button" data-panel="productsPanel"><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg><span>Catalogue</span></button>
+        <button class="tab" id="staffTab" type="button" data-panel="staffPanel" hidden><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16 15c3 0 5 2 5 5"/></svg><span>Employés</span></button>
+        <button class="tab" id="adminTab" type="button" data-panel="adminPanel" hidden><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Administration</span></button>
+        <div class="sidebar-footer">
+          <button class="sidebar-action" id="profileButton" type="button" title="Profil"><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>Profil</span></button>
+          <button class="sidebar-action sidebar-logout" id="logoutButton" type="button" title="Se déconnecter"><svg class="tab-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg><span>Se déconnecter</span></button>
+        </div>
+      </nav>
+      <div class="app-content">
 
-      <div class="card dashboard-card">
-        <h3>Budget par département</h3>
-        <div class="budget-legend" aria-hidden="true">
-          <span><i class="swatch swatch-spent"></i>Dépensé</span>
-          <span><i class="swatch swatch-pending"></i>En attente</span>
-          <span><i class="swatch swatch-over"></i>Dépassement</span>
-        </div>
-        <div class="table-wrap">
-          <table class="budget-table">
-            <thead>
-              <tr>
-                <th scope="col">Département</th>
-                <th scope="col">Budget annuel</th>
-                <th scope="col" class="num">Dépensé</th>
-                <th scope="col" class="num">En attente</th>
-                <th scope="col" class="num">Restant</th>
-                <th scope="col">Utilisation</th>
-              </tr>
-            </thead>
-            <tbody id="budgetRows"></tbody>
-          </table>
-        </div>
-        <p class="form-message" id="budgetMessage" role="status"></p>
-      </div>
-    </section>
-
-    <section class="panel" id="ordersPanel">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">SUIVI DES ACHATS</p>
-          <h2>Demandes en attente</h2>
-        </div>
-        <button class="button" id="newOrderButton" type="button" hidden>Nouvelle demande</button>
-      </div>
-
-      <form class="card order-form" id="orderForm" hidden>
-        <h3>Préparer une demande</h3>
-        <p class="muted">Choisissez les articles et les quantités. Le prix est calculé au moment de la demande.</p>
-        <div class="order-items" id="orderItems"></div>
-        <button class="button button-secondary" id="addOrderItem" type="button">Ajouter un produit</button>
-        <label for="orderNotes">Note pour l’administrateur <span class="optional">(facultatif)</span></label>
-        <textarea id="orderNotes" name="notes" maxlength="1000" rows="3"></textarea>
-        <p class="form-message" id="orderMessage" role="status"></p>
-        <button class="button" type="submit">Soumettre la demande</button>
-      </form>
-
-      <div class="order-list" id="orderList" aria-live="polite">
-        <p class="muted">Chargement des demandes…</p>
-      </div>
-    </section>
-
-    <section class="panel" id="historyPanel" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">DEMANDES TRAITÉES</p>
-          <h2>Historique des commandes</h2>
-        </div>
-        <div class="form-actions history-actions">
-          <button class="button button-secondary" id="historyPreviewButton" type="button" aria-expanded="false">Visualiser</button>
-          <button class="button" id="historyDownloadButton" type="button">Télécharger en CSV</button>
-        </div>
-      </div>
-
-      <div class="card table-wrap" id="historyPreview" hidden></div>
-    </section>
-
-    <section class="panel" id="productsPanel" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">ARTICLES DISPONIBLES</p>
-          <h2>Catalogue des produits</h2>
-        </div>
-      </div>
-      <form class="card product-form" id="productForm">
-        <h3 id="productFormTitle">Ajouter un produit</h3>
-        <input id="productId" name="productId" type="hidden">
-        <label for="productName">Nom du produit</label>
-        <input id="productName" name="name" maxlength="150" required>
-        <label for="productDescription">Description <span class="optional">(facultatif)</span></label>
-        <textarea id="productDescription" name="description" maxlength="500" rows="2"></textarea>
-        <div id="productDepartmentField" hidden>
-          <label for="productDepartment">Département</label>
-          <select id="productDepartment" name="departmentId">
-            <option value="">Choisir un département</option>
-          </select>
-          <label for="productSupplier">Fournisseur <span class="optional">(facultatif)</span></label>
-          <input id="productSupplier" name="supplierName" list="supplierOptions" maxlength="150"
-            autocomplete="off" placeholder="Tapez le nom du fournisseur">
-          <datalist id="supplierOptions"></datalist>
-        </div>
-        <label for="productPrice">Prix unitaire (CAD)</label>
-        <input id="productPrice" name="price" type="number" min="0" max="21474836.47" step="0.01" required>
-        <label class="checkbox-label" for="productActive">
-          <input id="productActive" name="isActive" type="checkbox" checked>
-          Disponible pour les nouvelles demandes
-        </label>
-        <div class="form-actions">
-          <button class="button" id="saveProductButton" type="submit">Ajouter au catalogue</button>
-          <button class="button button-secondary" id="cancelProductEdit" type="button" hidden>Annuler</button>
-        </div>
-        <p class="form-message" id="productMessage" role="status"></p>
-      </form>
-      <div class="catalogue-heading" id="productFilterField" hidden>
-        <h3>Produits par département</h3>
-        <label class="filter-label">
-          Département
-          <select id="productFilter">
-            <option value="">Choisir un département</option>
-          </select>
-        </label>
-      </div>
-      <div class="table-wrap" id="productList" aria-live="polite">
-        <p class="muted">Chargement du catalogue…</p>
-      </div>
-    </section>
-
-    <section class="panel" id="developerPanel" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">ACCÈS DE L’ENTREPRISE</p>
-          <h2>Administrateurs</h2>
-        </div>
-        <button class="button" id="addAdminButton" type="button">Inviter un administrateur</button>
-      </div>
-      <p class="muted">Invitez l’administrateur de l’entreprise : il reçoit un courriel et choisit lui-même son mot de passe.</p>
-      <form class="card admin-form" id="adminInvitationForm" hidden>
-        <h4>Inviter un administrateur</h4>
-        <label for="adminInviteName">Nom complet</label>
-        <input id="adminInviteName" name="fullName" maxlength="150" autocomplete="off" required>
-        <label for="adminInviteEmail">Adresse courriel</label>
-        <input id="adminInviteEmail" name="email" type="email" maxlength="254" required>
-        <div class="form-actions">
-          <button class="button" type="submit">Envoyer l’invitation</button>
-          <button class="button button-secondary" data-cancel type="button">Annuler</button>
-        </div>
-      </form>
-      <p class="form-message" id="adminInvitationMessage" role="status"></p>
-      <div class="table-wrap" id="adminTable"></div>
-    </section>
-
-    <section class="panel" id="adminPanel" hidden>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">GESTION</p>
-          <h2>Administration</h2>
-        </div>
-      </div>
-      <div class="admin-layout">
-        <nav class="admin-menu" aria-label="Sections de l’administration">
-          <button class="admin-menu-item active" type="button" data-admin-section="managersSection">Responsables</button>
-          <button class="admin-menu-item" type="button" data-admin-section="departmentsSection">Départements</button>
-          <button class="admin-menu-item" type="button" data-admin-section="suppliersSection">Fournisseurs</button>
-        </nav>
-
-        <div class="admin-content">
-          <section class="admin-section" id="managersSection">
-            <div class="admin-section-heading">
-              <h3>Responsables</h3>
-              <button class="button" id="addManagerButton" type="button">Ajouter un responsable</button>
+        <!-- "Tableau de bord": the budgets (director, responsable), then the purchases (director,
+             responsable, accountant), for the chosen year. -->
+        <section class="panel" id="homePanel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" id="dashboardEyebrow">SUIVI DES BUDGETS ET DES ACHATS</p>
+              <h2>Tableau de bord</h2>
             </div>
-            <form class="card admin-form" id="invitationForm" hidden>
-              <h4 id="managerFormTitle">Inviter un responsable</h4>
-              <input name="userId" type="hidden">
-              <label for="inviteName">Nom complet</label>
-              <input id="inviteName" name="fullName" maxlength="150" autocomplete="off" required>
-              <label for="inviteEmail">Adresse courriel</label>
-              <input id="inviteEmail" name="email" type="email" maxlength="254" required>
-              <label for="departmentId">Département</label>
-              <select id="departmentId" name="departmentId" required>
+            <label class="filter-label">
+              Année
+              <select id="dashboardYear"></select>
+            </label>
+          </div>
+
+          <div class="budget-dashboard" id="budgetDashboard" hidden>
+          <h3 class="dashboard-section-title">Budgets et dépenses</h3>
+          <p class="muted dashboard-note">Dépensé = demandes approuvées. En attente = demandes pas encore approuvées. Calculé selon la date de la demande. Les demandes pour un client sont comptées à part, hors budget.</p>
+          <div class="kpi-row" id="kpiRow" aria-live="polite"></div>
+
+          <div class="card dashboard-card">
+            <h3>Budget par département</h3>
+            <div class="budget-legend" aria-hidden="true">
+              <span><i class="swatch swatch-spent"></i>Dépensé</span>
+              <span><i class="swatch swatch-pending"></i>En attente</span>
+              <span><i class="swatch swatch-over"></i>Dépassement</span>
+            </div>
+            <div class="table-wrap">
+              <table class="budget-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Département</th>
+                    <th scope="col">Budget annuel</th>
+                    <th scope="col" class="num">Dépensé</th>
+                    <th scope="col" class="num">En attente</th>
+                    <th scope="col" class="num">Restant</th>
+                    <th scope="col">Utilisation</th>
+                  </tr>
+                </thead>
+                <tbody id="budgetRows"></tbody>
+              </table>
+            </div>
+            <p class="form-message" id="budgetMessage" role="status"></p>
+          </div>
+          </div>
+
+          <div class="purchase-dashboard" id="purchaseDashboard">
+          <h3 class="dashboard-section-title">Achats</h3>
+          <p class="muted dashboard-note" id="purchaseDashboardNote">Montants des demandes approuvées (date de la demande) et des bons de commande achetés (date d’achat).</p>
+          <p class="form-message" id="accountingMessage" role="status"></p>
+          <div class="kpi-row" id="accountingKpis" aria-live="polite"></div>
+
+          <div class="card dashboard-card">
+            <h3>Dépenses par mois</h3>
+            <div class="budget-legend" aria-hidden="true">
+              <span><i class="swatch swatch-spent"></i>Demandes approuvées</span>
+              <span><i class="swatch swatch-purchased"></i>Bons achetés</span>
+            </div>
+            <div class="month-chart" id="accountingMonths"></div>
+          </div>
+
+          <div class="dashboard-grid">
+            <div class="card dashboard-card">
+              <h3>Produits les plus commandés</h3>
+              <div class="table-wrap" id="accountingTopProducts"></div>
+            </div>
+            <div class="card dashboard-card">
+              <h3>Dépenses par fournisseur</h3>
+              <div class="table-wrap" id="accountingSuppliers"></div>
+            </div>
+            <div class="card dashboard-card">
+              <h3>Dépenses par catégorie</h3>
+              <div class="table-wrap" id="accountingCategories"></div>
+            </div>
+          </div>
+
+          <div class="card dashboard-card">
+            <h3>Produits dont le prix a augmenté</h3>
+            <p class="muted">Premier prix payé dans une demande comparé au prix actuel du catalogue.</p>
+            <div class="table-wrap" id="accountingPriceIncreases"></div>
+          </div>
+          </div>
+        </section>
+
+        <section class="panel" id="ordersPanel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">SUIVI DES ACHATS</p>
+              <h2>Demandes en attente</h2>
+            </div>
+            <button class="button" id="newOrderButton" type="button" hidden>Nouvelle demande</button>
+          </div>
+
+          <form class="card order-form" id="orderForm" hidden>
+            <div class="order-form-heading">
+              <h3>Préparer une demande</h3>
+              <span class="order-number-preview" id="orderNumberPreview" title="Numéro attribué à l’envoi de la demande"></span>
+            </div>
+            <p class="muted">Choisissez les articles et les quantités. Le prix est calculé au moment de la demande.</p>
+            <fieldset class="order-type">
+              <legend>Cette demande est pour</legend>
+              <label class="checkbox-label">
+                <input type="radio" name="orderType" value="internal" checked>
+                L’entreprise (budget du département)
+              </label>
+              <label class="checkbox-label">
+                <input type="radio" name="orderType" value="external">
+                Un client (externe, hors budget de l’entreprise)
+              </label>
+            </fieldset>
+            <div class="client-fields" id="clientFields" hidden>
+              <div class="field-pair">
+                <div>
+                  <label for="orderClientName">Nom du client</label>
+                  <input id="orderClientName" name="clientName" maxlength="150" autocomplete="off">
+                </div>
+                <div>
+                  <label for="orderClientReference">Référence <span class="optional">(projet, soumission…)</span></label>
+                  <input id="orderClientReference" name="clientReference" maxlength="100" autocomplete="off">
+                </div>
+              </div>
+            </div>
+            <div id="orderDepartmentField" hidden>
+              <label for="orderDepartment">Département de la demande</label>
+              <select id="orderDepartment" name="departmentId">
                 <option value="">Choisir un département</option>
               </select>
-              <div class="form-actions">
-                <button class="button" type="submit">Envoyer l’invitation</button>
-                <button class="button button-secondary" data-cancel type="button">Annuler</button>
-              </div>
-            </form>
-            <p class="form-message" id="invitationMessage" role="status"></p>
-            <div class="table-wrap" id="managerTable"></div>
-          </section>
-
-          <section class="admin-section" id="departmentsSection" hidden>
-            <div class="admin-section-heading">
-              <h3>Départements</h3>
-              <button class="button" id="addDepartmentButton" type="button">Ajouter un département</button>
             </div>
-            <form class="card admin-form" id="departmentForm" hidden>
-              <h4 id="departmentFormTitle">Ajouter un département</h4>
-              <input name="departmentId" type="hidden">
-              <label for="departmentName">Nom du département</label>
-              <input id="departmentName" name="name" maxlength="100" required>
-              <div class="form-actions">
-                <button class="button" type="submit">Enregistrer</button>
-                <button class="button button-secondary" data-cancel type="button">Annuler</button>
-              </div>
-            </form>
-            <p class="form-message" id="departmentMessage" role="status"></p>
-            <div class="table-wrap" id="departmentTable"></div>
-          </section>
+            <div class="order-items" id="orderItems"></div>
+            <button class="button button-secondary" id="addOrderItem" type="button">Ajouter un produit</button>
+            <label for="orderNotes">Note pour l’approbateur <span class="optional">(facultatif)</span></label>
+            <textarea id="orderNotes" name="notes" maxlength="1000" rows="3"></textarea>
+            <label class="checkbox-label urgent-choice" for="orderUrgent">
+              <input id="orderUrgent" name="urgent" type="checkbox">
+              Commande urgente (traitée en priorité)
+            </label>
+            <div class="shipping-summary" id="orderShipping" hidden></div>
+            <p class="form-message" id="orderMessage" role="status"></p>
+            <button class="button" type="submit">Soumettre la demande</button>
+          </form>
 
-          <section class="admin-section" id="suppliersSection" hidden>
-            <div class="admin-section-heading">
-              <h3>Fournisseurs</h3>
-              <button class="button" id="addSupplierButton" type="button">Ajouter un fournisseur</button>
-            </div>
-            <form class="card admin-form" id="supplierForm" hidden>
-              <h4 id="supplierFormTitle">Ajouter un fournisseur</h4>
-              <input name="supplierId" type="hidden">
-              <label for="supplierName">Nom du fournisseur</label>
-              <input id="supplierName" name="name" maxlength="150" required>
-              <label for="supplierContact">Personne contact <span class="optional">(facultatif)</span></label>
-              <input id="supplierContact" name="contactName" maxlength="150">
-              <label for="supplierEmail">Courriel <span class="optional">(facultatif)</span></label>
-              <input id="supplierEmail" name="email" type="email" maxlength="254">
-              <label for="supplierPhone">Téléphone <span class="optional">(facultatif)</span></label>
-              <input id="supplierPhone" name="phone" type="tel" maxlength="50">
-              <div class="form-actions">
-                <button class="button" type="submit">Enregistrer</button>
-                <button class="button button-secondary" data-cancel type="button">Annuler</button>
+          <details class="card shipping-card" id="shippingCard" hidden>
+            <summary>Livraison gratuite par fournisseur</summary>
+            <p class="muted">Montant à partir duquel la livraison est gratuite, et ce que le bon en cours du fournisseur contient déjà (demandes approuvées, pas encore transmises).</p>
+            <div class="table-wrap" id="shippingTable"></div>
+          </details>
+
+          <div class="purchase-section" id="purchaseSection" hidden>
+            <h3>Bons de commande à acheter</h3>
+            <p class="muted">Un bon par fournisseur : les demandes approuvées y sont regroupées automatiquement. La direction transmet le bon au fournisseur ; cliquez « Marquer comme acheté » une fois l’achat réglé.</p>
+            <div class="order-list" id="purchaseList"></div>
+            <div class="purchase-export">
+              <div>
+                <h4>Bons achetés</h4>
+                <p class="muted" id="purchaseExportSummary"></p>
               </div>
-            </form>
-            <p class="form-message" id="supplierMessage" role="status"></p>
-            <div class="table-wrap" id="supplierTable"></div>
-          </section>
-        </div>
+              <div class="form-actions history-actions">
+                <button class="button button-secondary" id="purchasePreviewButton" type="button" aria-expanded="false">Visualiser</button>
+                <button class="button" id="purchaseDownloadButton" type="button">Télécharger pour Excel</button>
+              </div>
+            </div>
+            <div class="card table-wrap" id="purchasePreview" hidden></div>
+            <h3 class="pending-title">Demandes en attente d’approbation</h3>
+          </div>
+          <div class="order-list" id="orderList" aria-live="polite">
+            <p class="muted">Chargement des demandes…</p>
+          </div>
+        </section>
+
+        <section class="panel" id="purchasePanel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">COMPTABILITÉ</p>
+              <h2>Bons de commande</h2>
+            </div>
+            <div class="form-actions history-actions">
+              <button class="button button-secondary" id="poReportPreviewButton" type="button" aria-expanded="false">Visualiser le détail</button>
+              <button class="button" id="poReportDownload" type="button">Télécharger en CSV</button>
+            </div>
+          </div>
+          <div class="admin-filters">
+            <label class="filter-label">
+              Département
+              <select id="poReportDepartment"><option value="">Tous les départements</option></select>
+            </label>
+            <label class="filter-label">
+              Année
+              <select id="poReportYear"><option value="">Toutes les années</option></select>
+            </label>
+            <label class="filter-label">
+              Mois
+              <select id="poReportMonth"><option value="">Tous les mois</option></select>
+            </label>
+          </div>
+          <p class="muted" id="poReportSummary"></p>
+          <p class="form-message" id="poReportMessage" role="status"></p>
+          <div class="card dashboard-card">
+            <h3>Par département</h3>
+            <div class="table-wrap" id="poReportByDepartment"></div>
+          </div>
+          <div class="card dashboard-card">
+            <h3>Par mois</h3>
+            <div class="table-wrap" id="poReportByMonth"></div>
+          </div>
+          <div class="card table-wrap" id="poReportDetail" hidden></div>
+        </section>
+
+        <section class="panel" id="historyPanel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">DEMANDES TRAITÉES</p>
+              <h2>Historique des commandes</h2>
+            </div>
+            <div class="form-actions history-actions">
+              <button class="button button-secondary" id="historyPreviewButton" type="button" aria-expanded="false">Visualiser</button>
+              <button class="button" id="historyDownloadButton" type="button">Télécharger en CSV</button>
+            </div>
+          </div>
+
+          <div class="card table-wrap" id="historyPreview" hidden></div>
+        </section>
+
+        <section class="panel" id="productsPanel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ARTICLES DISPONIBLES</p>
+              <h2>Catalogue des produits</h2>
+            </div>
+          </div>
+          <nav class="admin-menu catalogue-menu" id="catalogueMenu" aria-label="Sections du catalogue" hidden>
+            <button class="admin-menu-item active" type="button" data-catalogue-view="catalogueProducts">Produits</button>
+            <button class="admin-menu-item" type="button" data-catalogue-view="catalogueSuppliers">Fournisseurs</button>
+          </nav>
+          <div id="catalogueProducts">
+          <form class="card product-form" id="productForm">
+            <h3 id="productFormTitle">Ajouter un produit</h3>
+            <input id="productId" name="productId" type="hidden">
+            <label for="productName">Nom du produit</label>
+            <input id="productName" name="name" maxlength="150" required>
+            <label for="productSku">SKU <span class="optional">(code du produit chez le fournisseur, facultatif)</span></label>
+            <input id="productSku" name="sku" maxlength="50" autocomplete="off">
+            <label for="productDescription">Description <span class="optional">(facultatif)</span></label>
+            <textarea id="productDescription" name="description" maxlength="500" rows="2"></textarea>
+            <div id="productDepartmentField" hidden>
+              <label for="productDepartment">Département</label>
+              <select id="productDepartment" name="departmentId">
+                <option value="">Choisir un département</option>
+              </select>
+            </div>
+            <label for="productSupplier">Fournisseur</label>
+            <input id="productSupplier" name="supplierName" list="supplierOptions" maxlength="150"
+              autocomplete="off" placeholder="Tapez ou choisissez le fournisseur" required>
+            <datalist id="supplierOptions"></datalist>
+            <label for="productPrice">Prix unitaire (CAD)</label>
+            <input id="productPrice" name="price" type="number" min="0" max="21474836.47" step="0.01" required>
+            <label for="productUnit">Unité de mesure <span class="optional">(le prix est par unité de mesure)</span></label>
+            <select id="productUnit" name="unit"></select>
+            <label class="checkbox-label" for="productActive">
+              <input id="productActive" name="isActive" type="checkbox" checked>
+              Disponible pour les nouvelles demandes
+            </label>
+            <div class="form-actions">
+              <button class="button" id="saveProductButton" type="submit">Ajouter au catalogue</button>
+              <button class="button button-secondary" id="cancelProductEdit" type="button" hidden>Annuler</button>
+            </div>
+            <p class="form-message" id="productMessage" role="status"></p>
+          </form>
+          <div class="catalogue-heading" id="productFilterField" hidden>
+            <h3>Produits par département</h3>
+            <label class="filter-label">
+              Département
+              <select id="productFilter">
+                <option value="">Choisir un département</option>
+              </select>
+            </label>
+          </div>
+          <div class="table-wrap" id="productList" aria-live="polite">
+            <p class="muted">Chargement du catalogue…</p>
+          </div>
+          </div>
+          <!-- A department responsable's supplier cards are moved here (see setupResponsableSuppliers). -->
+          <div id="catalogueSuppliers" hidden></div>
+        </section>
+
+        <section class="panel" id="staffPanel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">MON ÉQUIPE</p>
+              <h2>Employés de mon département</h2>
+            </div>
+          </div>
+          <form class="card admin-form team-invite" id="teamInviteForm">
+            <h4>Inviter un employé dans mon département</h4>
+            <label for="teamInviteName">Nom complet</label>
+            <input id="teamInviteName" name="fullName" maxlength="150" autocomplete="off" required>
+            <label for="teamInviteEmail">Adresse courriel</label>
+            <input id="teamInviteEmail" name="email" type="email" maxlength="254" required>
+            <div id="teamInviteDepartmentField" hidden>
+              <label for="teamInviteDepartment">Département</label>
+              <select id="teamInviteDepartment" name="departmentId"></select>
+            </div>
+            <div class="form-actions">
+              <button class="button" type="submit">Envoyer l’invitation</button>
+            </div>
+            <p class="form-message" id="teamInviteMessage" role="status"></p>
+          </form>
+          <form class="card admin-form team-invite" id="teamEditForm" hidden>
+            <h4>Modifier l’employé</h4>
+            <input name="userId" type="hidden">
+            <label for="teamEditName">Nom complet</label>
+            <input id="teamEditName" name="fullName" maxlength="150" autocomplete="off" required>
+            <div id="teamEditDepartmentField" hidden>
+              <label for="teamEditDepartment">Département</label>
+              <select id="teamEditDepartment" name="departmentId"></select>
+            </div>
+            <label for="teamEditRole">Accès</label>
+            <select id="teamEditRole" name="role">
+              <option value="employee">Employé</option>
+              <option value="accountant">Comptable (voit toutes les demandes)</option>
+              <option value="purchaser">Administration (transmet les bons aux fournisseurs)</option>
+            </select>
+            <div class="form-actions">
+              <button class="button" type="submit">Enregistrer</button>
+              <button class="button button-secondary" data-cancel type="button">Annuler</button>
+            </div>
+          </form>
+          <p class="form-message" id="teamEditMessage" role="status"></p>
+          <div class="team-list" id="teamList">
+            <p class="muted">Chargement de l’équipe…</p>
+          </div>
+
+          <div class="section-heading company-heading">
+            <div>
+              <p class="eyebrow">ANNUAIRE</p>
+              <h2>Toute l’entreprise</h2>
+            </div>
+          </div>
+          <div class="card table-wrap" id="staffTable">
+            <p class="muted">Chargement des employés…</p>
+          </div>
+        </section>
+
+        <section class="panel" id="developerPanel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ACCÈS DE L’ENTREPRISE</p>
+              <h2>Direction</h2>
+            </div>
+            <button class="button" id="addAdminButton" type="button">Inviter un directeur</button>
+          </div>
+          <p class="muted">Invitez le directeur de l’entreprise : il reçoit un courriel et choisit lui-même son mot de passe (ou se connecte avec Microsoft). Le rôle de Directeur lui est attribué automatiquement.</p>
+          <form class="card admin-form" id="adminInvitationForm" hidden>
+            <h4>Inviter un directeur</h4>
+            <label for="adminInviteName">Nom complet</label>
+            <input id="adminInviteName" name="fullName" maxlength="150" autocomplete="off" required>
+            <label for="adminInviteEmail">Adresse courriel</label>
+            <input id="adminInviteEmail" name="email" type="email" maxlength="254" required>
+            <div class="form-actions">
+              <button class="button" type="submit">Envoyer l’invitation</button>
+              <button class="button button-secondary" data-cancel type="button">Annuler</button>
+            </div>
+          </form>
+          <p class="form-message" id="adminInvitationMessage" role="status"></p>
+          <div class="table-wrap" id="adminTable"></div>
+        </section>
+
+        <section class="panel" id="adminPanel" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">GESTION</p>
+              <h2>Administration</h2>
+            </div>
+          </div>
+          <div class="card manager-requests" id="managerRequests" hidden></div>
+          <div class="admin-layout">
+            <nav class="admin-menu" aria-label="Sections de l’administration">
+              <button class="admin-menu-item active" type="button" data-admin-section="managersSection">Employés</button>
+              <button class="admin-menu-item" type="button" data-admin-section="departmentsSection">Départements</button>
+              <button class="admin-menu-item" type="button" data-admin-section="suppliersSection">Fournisseurs</button>
+              <button class="admin-menu-item" type="button" data-admin-section="adminProductsSection">Produits et prix</button>
+              <button class="admin-menu-item" type="button" data-admin-section="adminPurchaseSection">Bons de commande</button>
+              <button class="admin-menu-item" type="button" data-admin-section="adminPurchaseHistorySection">Historique des bons</button>
+              <button class="admin-menu-item" type="button" data-admin-section="directorySection" hidden>Employés</button>
+            </nav>
+
+            <div class="admin-content">
+              <section class="admin-section" id="managersSection">
+                <div class="admin-section-heading">
+                  <h3>Employés</h3>
+                  <button class="button" id="addManagerButton" type="button">Ajouter un employé</button>
+                </div>
+                <form class="card admin-form" id="invitationForm" hidden>
+                  <h4 id="managerFormTitle">Inviter un employé</h4>
+                  <input name="userId" type="hidden">
+                  <label for="inviteName">Nom complet</label>
+                  <input id="inviteName" name="fullName" maxlength="150" autocomplete="off" required>
+                  <label for="inviteEmail">Adresse courriel</label>
+                  <input id="inviteEmail" name="email" type="email" maxlength="254" required>
+                  <div id="staffRoleField" hidden>
+                    <label for="staffRole">Accès</label>
+                    <select id="staffRole" name="role">
+                      <option value="employee">Employé</option>
+                      <option value="accountant">Comptable (voit toutes les demandes)</option>
+                      <option value="purchaser">Administration (transmet les bons aux fournisseurs)</option>
+                    </select>
+                  </div>
+                  <label for="departmentId">Département</label>
+                  <select id="departmentId" name="departmentId" required>
+                    <option value="">Choisir un département</option>
+                  </select>
+                  <fieldset class="function-choices">
+                    <legend>Fonctions dans la procédure d’achat <span class="optional">(facultatif)</span></legend>
+                    <label><input type="checkbox" name="functions" value="transmitter_admin"> Transmetteur — administration</label>
+                    <label><input type="checkbox" name="functions" value="transmitter_production"> Transmetteur — production</label>
+                    <label><input type="checkbox" name="functions" value="transmitter_sales"> Transmetteur — ventes et graphisme</label>
+                    <label><input type="checkbox" name="functions" value="transmitter_backup"> Remplaçant(e) des transmetteurs</label>
+                    <label><input type="checkbox" name="functions" value="reception"> Réception (entrepôt)</label>
+                    <label><input type="checkbox" name="functions" value="accounting"> Comptabilité</label>
+                    <label><input type="checkbox" name="functions" value="general_management"> Direction générale</label>
+                  </fieldset>
+                  <p class="muted">Le responsable (approbateur) d’un département se choisit dans la section Départements.</p>
+                  <div class="form-actions">
+                    <button class="button" type="submit">Envoyer l’invitation</button>
+                    <button class="button button-secondary" data-cancel type="button">Annuler</button>
+                  </div>
+                </form>
+                <p class="form-message" id="invitationMessage" role="status"></p>
+                <div class="admin-filters">
+                  <label class="filter-label">
+                    Département
+                    <select id="managerFilter">
+                      <option value="">Tous les départements</option>
+                    </select>
+                  </label>
+                </div>
+                <p class="admin-filter-summary" id="managerFilterSummary" hidden></p>
+                <div class="table-wrap" id="managerTable"></div>
+              </section>
+
+              <section class="admin-section" id="departmentsSection" hidden>
+                <div class="admin-section-heading">
+                  <h3>Départements</h3>
+                  <button class="button" id="addDepartmentButton" type="button">Ajouter un département</button>
+                </div>
+                <form class="card admin-form" id="departmentForm" hidden>
+                  <h4 id="departmentFormTitle">Ajouter un département</h4>
+                  <input name="departmentId" type="hidden">
+                  <label for="departmentName">Nom du département</label>
+                  <input id="departmentName" name="name" maxlength="100" required>
+                  <label for="departmentManager">Responsable (approuve les achats du département)</label>
+                  <select id="departmentManager" name="managerUserId">
+                    <option value="">Aucun pour l’instant</option>
+                  </select>
+                  <div class="form-actions">
+                    <button class="button" type="submit">Enregistrer</button>
+                    <button class="button button-secondary" data-cancel type="button">Annuler</button>
+                  </div>
+                </form>
+                <p class="form-message" id="departmentMessage" role="status"></p>
+                <div class="table-wrap" id="departmentTable"></div>
+              </section>
+
+              <section class="admin-section" id="suppliersSection" hidden>
+                <div class="admin-section-heading">
+                  <h3>Fournisseurs</h3>
+                  <button class="button" id="addSupplierButton" type="button">Ajouter un fournisseur</button>
+                </div>
+                <form class="card admin-form" id="supplierForm" hidden>
+                  <h4 id="supplierFormTitle">Ajouter un fournisseur</h4>
+                  <input name="supplierId" type="hidden">
+                  <label for="supplierName">Nom du fournisseur</label>
+                  <input id="supplierName" name="name" maxlength="150" required>
+                  <label for="supplierEmail">Courriel <span class="optional">(facultatif)</span></label>
+                  <input id="supplierEmail" name="email" type="email" maxlength="254">
+                  <div class="field-pair">
+                    <div>
+                      <label for="supplierPhone">Téléphone <span class="optional">(facultatif)</span></label>
+                      <input id="supplierPhone" name="phone" type="tel" maxlength="50">
+                    </div>
+                    <div>
+                      <label for="supplierPhoneExtension">Poste</label>
+                      <input id="supplierPhoneExtension" name="phoneExtension" maxlength="20" inputmode="numeric">
+                    </div>
+                  </div>
+                  <label for="supplierContact">Personne ressource <span class="optional">(facultatif)</span></label>
+                  <input id="supplierContact" name="contactName" maxlength="150">
+                  <label for="supplierOrderMethod">Mode de commande (communication préférée)</label>
+                  <select id="supplierOrderMethod" name="orderMethod">
+                    <option value="">Non précisé</option>
+                    <option value="email">Courriel</option>
+                    <option value="website">Portail / site web</option>
+                    <option value="representative">Représentant</option>
+                  </select>
+                  <label for="supplierAccountNumber">Numéro de compte client <span class="optional">(souvent exigé par le fournisseur)</span></label>
+                  <input id="supplierAccountNumber" name="accountNumber" maxlength="50" autocomplete="off">
+                  <div class="field-pair">
+                    <div>
+                      <label for="supplierPaymentTerms">Conditions de paiement</label>
+                      <input id="supplierPaymentTerms" name="paymentTerms" maxlength="50" list="paymentTermOptions" placeholder="ex. Net 30">
+                      <datalist id="paymentTermOptions">
+                        <option value="Net 15"></option>
+                        <option value="Net 30"></option>
+                        <option value="Net 45"></option>
+                        <option value="Net 60"></option>
+                        <option value="Paiement à la commande"></option>
+                        <option value="Carte de crédit"></option>
+                        <option value="Contre remboursement"></option>
+                      </datalist>
+                    </div>
+                    <div>
+                      <label for="supplierCurrency">Devise de facturation</label>
+                      <select id="supplierCurrency" name="currency">
+                        <option value="CAD" selected>CAD</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label for="supplierCategory">Catégorie principale <span class="optional">(ex. emballage, fournitures de bureau)</span></label>
+                  <input id="supplierCategory" name="category" maxlength="100" list="supplierCategoryOptions">
+                  <datalist id="supplierCategoryOptions"></datalist>
+                  <label class="checkbox-row" for="supplierAuthorized">
+                    <input id="supplierAuthorized" name="isAuthorized" type="checkbox" checked>
+                    Fournisseur autorisé <span class="optional">(décoché : seule la direction peut y commander)</span>
+                  </label>
+                  <label for="supplierWebsite">Site web <span class="optional">(facultatif)</span></label>
+                  <input id="supplierWebsite" name="website" type="text" maxlength="300" placeholder="https://www.exemple.com">
+                  <label for="supplierNote">Note <span class="optional">(facultatif, interne : les employés ne la voient pas)</span></label>
+                  <textarea id="supplierNote" name="note" maxlength="1000" rows="2"></textarea>
+                  <div class="field-pair">
+                    <div>
+                      <label for="supplierReducedThreshold">Seuil livraison réduite ($)</label>
+                      <input id="supplierReducedThreshold" name="reducedThreshold" inputmode="decimal" placeholder="ex. 150">
+                    </div>
+                    <div>
+                      <label for="supplierFreeThreshold">Seuil livraison gratuite ($)</label>
+                      <input id="supplierFreeThreshold" name="freeThreshold" inputmode="decimal" placeholder="ex. 300">
+                    </div>
+                  </div>
+                  <div class="form-actions">
+                    <button class="button" type="submit">Enregistrer</button>
+                    <button class="button button-secondary" data-cancel type="button">Annuler</button>
+                  </div>
+                </form>
+                <p class="form-message" id="supplierMessage" role="status"></p>
+                <div class="table-wrap" id="supplierTable"></div>
+              </section>
+
+              <section class="admin-section" id="directorySection" hidden>
+                <div class="admin-section-heading">
+                  <h3>Employés par département</h3>
+                </div>
+                <div id="directoryGroups"></div>
+              </section>
+
+              <section class="admin-section" id="adminProductsSection" hidden>
+                <div class="admin-section-heading">
+                  <h3>Produits et prix</h3>
+                </div>
+                <div class="admin-filters">
+                  <label class="filter-label">
+                    Département
+                    <select id="adminProductDepartment">
+                      <option value="">Tous les départements</option>
+                    </select>
+                  </label>
+                  <label class="filter-label">
+                    Fournisseur
+                    <select id="adminProductSupplier">
+                      <option value="">Tous les fournisseurs</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="table-wrap" id="adminProductTable"></div>
+              </section>
+
+              <section class="admin-section" id="adminPurchaseSection" hidden>
+                <div class="admin-section-heading">
+                  <h3>Bons de commande</h3>
+                </div>
+                <p class="muted">Les demandes approuvées par le responsable du département ou par la direction, de tous les départements, sont regroupées automatiquement : un bon par fournisseur. Transmettez chaque bon à son fournisseur : il passe alors à « Acheté » et va dans l’Historique des bons.</p>
+                <p class="form-message" id="adminPurchaseMessage" role="status"></p>
+                <div class="order-list" id="adminPurchaseList"></div>
+              </section>
+
+              <section class="admin-section" id="adminPurchaseHistorySection" hidden>
+                <div class="admin-section-heading">
+                  <h3>Historique des bons</h3>
+                  <div class="form-actions history-actions">
+                    <button class="button" id="adminPurchaseHistoryDownload" type="button">Télécharger pour Excel</button>
+                  </div>
+                </div>
+                <p class="muted" id="adminPurchaseHistorySummary"></p>
+                <div class="admin-filters">
+                  <label class="filter-label">
+                    Fournisseur
+                    <select id="adminPurchaseHistorySupplier">
+                      <option value="">Tous les fournisseurs</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="order-list" id="adminPurchaseHistoryList"></div>
+              </section>
+            </div>
+          </div>
+        </section>
       </div>
-    </section>
+    </div>
   </main>
 
   <dialog class="password-dialog" id="profileDialog" aria-labelledby="profileDialogTitle">
@@ -304,6 +684,10 @@
       <h3 id="profileDialogTitle">Mon profil</h3>
       <label for="profileFullName">Nom complet (prénom et nom)</label>
       <input id="profileFullName" name="fullName" maxlength="150" required autocomplete="name">
+      <div id="profileDepartmentField" hidden>
+        <label for="profileDepartmentSelect">Mon département</label>
+        <select id="profileDepartmentSelect" name="departmentId"></select>
+      </div>
       <dl class="profile-details">
         <dt>Courriel</dt>
         <dd id="profileEmail"></dd>
@@ -311,6 +695,10 @@
         <dd id="profileRole"></dd>
         <dt id="profileDepartmentLabel">Département</dt>
         <dd id="profileDepartment"></dd>
+        <dt id="profileManagedLabel">Responsable de</dt>
+        <dd id="profileManaged"></dd>
+        <dt id="profileFunctionsLabel">Fonctions</dt>
+        <dd id="profileFunctions"></dd>
       </dl>
       <p class="form-message" id="profileMessage" role="status"></p>
       <div class="form-actions">
@@ -337,6 +725,40 @@
       <div class="form-actions">
         <button class="button" type="submit">Enregistrer</button>
         <button class="button button-secondary" id="closePasswordDialog" type="button">Fermer</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="password-dialog po-dialog" id="poDocumentDialog" aria-labelledby="poDocumentTitle">
+    <div class="card">
+      <h3 class="visually-hidden" id="poDocumentTitle">Bon de commande</h3>
+      <div class="po-document" id="poDocumentContent"></div>
+      <div class="form-actions po-dialog-actions">
+        <button class="button" id="poPrintButton" type="button">Imprimer</button>
+        <button class="button button-secondary" id="poPdfButton" type="button">Télécharger le PDF</button>
+        <button class="button button-secondary" id="poCopyDocument" type="button">Copier le texte</button>
+        <button class="button button-secondary" id="closePoDocument" type="button">Fermer</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="password-dialog po-dialog" id="poSendDialog" aria-labelledby="poSendTitle">
+    <form class="card" id="poSendForm">
+      <h3 id="poSendTitle">Transmettre le bon</h3>
+      <div class="supplier-details" id="poSendSupplier"></div>
+      <label for="poSendMethod">Transmettre par</label>
+      <select id="poSendMethod" name="method" required>
+        <option value="email">Courriel (envoyé par le site)</option>
+        <option value="website">Portail / site web du fournisseur</option>
+        <option value="representative">Représentant</option>
+      </select>
+      <label for="poSendNote">Note au fournisseur <span class="optional">(facultatif : livraison, délai…)</span></label>
+      <textarea id="poSendNote" name="note" maxlength="1000" rows="3"></textarea>
+      <p class="muted po-send-help" id="poSendHelp"></p>
+      <div class="form-actions" id="poSendTools"></div>
+      <p class="form-message" id="poSendMessage" role="status"></p>
+      <div class="form-actions">
+        <button class="button" id="poSendSubmit" type="submit">Envoyer</button>
+        <button class="button button-secondary" id="closePoSend" type="button">Annuler</button>
       </div>
     </form>
   </dialog>
